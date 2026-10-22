@@ -15,13 +15,13 @@ El Verificador is the trust boundary of the local software factory. It sits betw
 position defines everything about how it must be built: it must be *independent*,
 *evidence-backed*, *replayable*, and *incapable of granting itself authority*.
 
-The current build (4 commits, 22 passing tests) is a competent skeleton with three
-working parts — running commands in a container, a regex stub scan, and a SQLite
-insert — and four decorative parts that are advertised in the README and SPEC but
-produce no decision effect: the AST "semantic diff", the intent-coverage score, the
-LLM-composed Correction Prompt, and the EdgeRecord audit trail. The headline feature
-("did the agent actually build the API route, or just write a TODO stub?") is
-**not implemented**; the code that claims to answer it is never consulted.
+The current build is a competent skeleton with three working parts — running commands
+in a container, a regex stub scan, and a SQLite insert — and four decorative parts
+that are advertised in the README and SPEC but produce no decision effect: the AST
+"semantic diff", the intent-coverage score, the LLM-composed Correction Prompt, and
+the EdgeRecord audit trail. The headline feature ("did the agent actually build the
+API route, or just write a TODO stub?") is **not implemented**; the code that claims
+to answer it is never consulted.
 
 The long-term plan is therefore not "add features." It is, in order:
 
@@ -105,11 +105,27 @@ Phase 1 and Phase 3 exist to make the second half of the rule true.
 Assessed on 2026-10-22 against `a1100cf`. Every claim below was checked by running
 the code, not by reading it. Reproduction commands are in Appendix A.
 
+**Assessment basis, and what survived later repairs.** The assessment was made
+against `a1100cf`. Repairs committed afterwards (Appendix B) fixed five
+*execution-path* defects and took the suite from 22 to 27 tests. Every finding in
+this section was re-verified against the code as of `56edd17` and **all of them
+still hold**: the host-execution fallback is present, `MODIFIED` is still never
+emitted, the coverage threshold is still never consulted, the LLM's Correction
+Prompt is still discarded, `git add -A` is still in the commit path, the escalation
+path still drops its evidence, and the audit trail is still written to an invented
+SQLite table rather than to EdgeRecord. The repairs made the tool *run*; they did
+not make it *judge*.
+
+Read the two halves together: Appendix B is the other agent's honest, verifiable
+account of why the tool could not complete a verification at all. §2 is the
+equivalent account of why, when it does complete one, the verdict it produces
+carries very little information.
+
 ### 2.1 What actually works
 
 | Capability | Status |
 |---|---|
-| Package structure, packaging, entry point, CI workflow | Working. `pytest` → 22 passed. `unittest discover` → 22 passed. |
+| Package structure, packaging, entry point, CI workflow | Working. `pytest` → 27 passed. `unittest discover` → 27 passed. |
 | Pydantic v2 contracts with `extra="forbid"` | Working and well-formed. |
 | Container lifecycle (`start` / `teardown`) | Working, but see §2.3.1. |
 | `CheckResult` capture (exit code, stdout, stderr, duration) | Working. |
@@ -199,7 +215,7 @@ correction burns the full retry budget in seconds. There is no no-progress detec
 - `config --init` writes `~/.el-verificador/config.yaml`; **nothing ever reads it**.
   The CLI only loads config when `--config` is passed explicitly. The documented
   configuration path is a dead end.
-- `datetime.utcnow()` is used in 8 places and emits `DeprecationWarning` on the
+- `datetime.utcnow()` is used in 4 places and emits `DeprecationWarning` on the
   Python 3.14 interpreter this project is actually running under.
 
 ### 2.4 Test coverage of the real risk surface
@@ -935,10 +951,23 @@ neither.
 
 **A.10 — Baseline**
 
-`pytest` → 22 passed. `python -m unittest discover -s tests` → 22 passed. CI
+`pytest` → 27 passed. `python -m unittest discover -s tests` → 27 passed. CI
 (`ubuntu-latest`/`macos-latest` × Python 3.11/3.13) is configured and green.
 `datetime.utcnow()` emits `DeprecationWarning` under the Python 3.14 interpreter in
 use.
+
+**A.11 — Findings re-verified after the concurrent repairs**
+
+Every finding in §2 was re-run against `56edd17` (after the Appendix B repairs).
+Results, unchanged: `MODIFIED` still never emitted; `intent_coverage_threshold`
+and `fail_on_todo_stubs` still 0 references in `engine.py`; `_llm_text` still set
+and never read; `git add -A` still in `GitOps.commit()`; the `ESCALATE` branch of
+`engine.verify()` still constructs a `VerificationResult` with no
+`check_results` and no `semantic_diff`; the dry-run path in
+`DockerRunner.run_check()` still shells out to the host; `VerificationConfig`
+still defines `__post_init__` that pydantic v2 never calls; `~/.el-verificador/config.yaml`
+still written by `config --init` and still never read; the audit hash still
+computed from a concatenated string that excludes the evidence.
 
 ---
 
