@@ -1,0 +1,12 @@
+{
+  "decision": "fail",
+  "violations": [
+    "acceptance_command_0"
+  ],
+  "checks": {
+    "pytest -q": {
+      "exit_code": 1,
+      "stderr": "ImportError: no module named app"
+    }
+  }
+}

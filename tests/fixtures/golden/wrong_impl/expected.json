@@ -1,0 +1,7 @@
+{
+  "decision": "fail",
+  "violations": [
+    "symbol_present",
+    "goal_terms_present"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "decision": "fail",
+  "violations": [
+    "scope_respected"
+  ],
+  "scope_mode": "enforce"
+}

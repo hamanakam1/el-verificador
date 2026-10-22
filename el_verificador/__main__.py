@@ -7,12 +7,27 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any, Coroutine, Dict, Optional
 
 import yaml
 
 from .engine import ElVerificador
+from .schemas import (
+    CorrectionPrompt,
+    EdgeRecordLogger,
+    VerificationConfig,
+    VerificationDecision,
+    VerificationResult,
+)
 from .taskrivet_adapter import adapter_from_args, add_taskrivet_arguments
-from .schemas import EdgeRecordLogger, VerificationConfig
+
+DEFAULT_CONFIG_PATH = Path.home() / ".el-verificador" / "config.yaml"
+
+# Exit codes. A dry run that never executed the checks did not reach a
+# verdict, and that is not the same thing as a failure.
+EXIT_PASS = 0
+EXIT_FAIL = 1
+EXIT_INCONCLUSIVE = 2
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -31,9 +46,17 @@ def create_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--repo", required=True, help="Path to the repository")
     verify_parser.add_argument("--base", default="HEAD~1", help="Base commit")
     verify_parser.add_argument("--head", default="HEAD", help="Head commit")
-    verify_parser.add_argument("--config", help="Path to config YAML")
     verify_parser.add_argument(
-        "--dry-run", action="store_true", help="Skip Docker/git/EdgeRecord writes"
+        "--config", help="Path to config YAML (overrides ~/.el-verificador/config.yaml)"
+    )
+    verify_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Do not write anything and do not execute acceptance commands",
+    )
+    verify_parser.add_argument(
+        "--check-fixture",
+        help="Recorded acceptance results to replay instead of executing commands",
     )
 
     add_taskrivet_arguments(verify_parser)
@@ -54,35 +77,52 @@ def create_parser() -> argparse.ArgumentParser:
     config_parser.add_argument(
         "--init", action="store_true", help="Create default config file"
     )
+    config_parser.add_argument(
+        "--show", action="store_true", help="Print the effective configuration"
+    )
 
     return parser
 
 
-async def main() -> int:
+def load_config(explicit_path: Optional[str] = None) -> VerificationConfig:
+    """Load configuration from the default location, then any explicit file.
+
+    The default location used to be written by `config --init` and never read,
+    so every documented setting was inert. The file is now validated through
+    the pydantic model, which means an unknown key is an error rather than a
+    silently ignored line.
+    """
+    merged: Dict[str, Any] = {}
+    sources = []
+    if DEFAULT_CONFIG_PATH.exists():
+        sources.append(DEFAULT_CONFIG_PATH)
+    if explicit_path:
+        explicit = Path(explicit_path).expanduser()
+        if not explicit.exists():
+            raise FileNotFoundError(f"config file not found: {explicit}")
+        sources.append(explicit)
+
+    for source in sources:
+        raw = yaml.safe_load(source.read_text()) or {}
+        if not isinstance(raw, dict):
+            raise ValueError(f"config file must contain a mapping: {source}")
+        merged.update(raw)
+
+    return VerificationConfig.model_validate(merged)
+
+
+def main() -> int:
     parser = create_parser()
     args = parser.parse_args()
 
-    config = VerificationConfig()
-    if getattr(args, "config", None):
-        with open(args.config) as f:
-            for k, v in yaml.safe_load(f).items():
-                if hasattr(config, k):
-                    setattr(config, k, v)
-    if getattr(args, "dry_run", False):
-        config.dry_run = True
-
-    if not hasattr(args, "command") or not args.command:
-        parser.print_help()
-        return 1
-
     try:
         if args.command == "verify":
-            return await cmd_verify(args, config)
+            return run_sync(cmd_verify(args))
         if args.command == "audit":
-            return await cmd_audit(args)
+            return run_sync(cmd_audit(args))
         if args.command == "config":
-            return await cmd_config(args)
-        print(f"Unknown command: {args.command}", file=sys.stderr)
+            return run_sync(cmd_config(args))
+        parser.print_help()
         return 1
     except KeyboardInterrupt:
         return 130
@@ -91,10 +131,19 @@ async def main() -> int:
         return 1
 
 
-async def cmd_verify(args: argparse.Namespace, config: VerificationConfig) -> int:
-    with open(args.work_package) as f:
-        work_package = json.load(f)
+def run_sync(coro: Coroutine[Any, Any, int]) -> int:
+    """Run an async command from the synchronous CLI entry point."""
+    return int(asyncio.run(coro))
 
+
+async def cmd_verify(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    if getattr(args, "dry_run", False):
+        config.dry_run = True
+    if getattr(args, "check_fixture", None):
+        config.check_fixture = args.check_fixture
+
+    work_package = json.loads(Path(args.work_package).read_text())
     verifier = ElVerificador(config)
 
     adapter = adapter_from_args(args)
@@ -108,7 +157,7 @@ async def cmd_verify(args: argparse.Namespace, config: VerificationConfig) -> in
         taskrivet_retry = adapter.retry_callback()
     else:
 
-        def taskrivet_retry(prompt):  # noqa: ARG001
+        def taskrivet_retry(prompt: CorrectionPrompt) -> None:  # noqa: ARG001
             # No Taskrivet ledger configured: report the prompt and let the
             # operator decide what to do next.
             print("\n=== CORRECTION PROMPT (hand back to Taskrivet) ===\n")
@@ -144,14 +193,44 @@ async def cmd_verify(args: argparse.Namespace, config: VerificationConfig) -> in
                 )
             )
 
-    print(json.dumps(result.model_dump(mode="json"), indent=2))
-    return 0 if result.passed else 1
+    _report(result)
+    print(json.dumps(result.model_dump(mode="json"), indent=2, ensure_ascii=False))
+
+    if result.decision == VerificationDecision.PASS:
+        return EXIT_PASS
+    if result.decision == VerificationDecision.INCONCLUSIVE:
+        return EXIT_INCONCLUSIVE
+    return EXIT_FAIL
+
+
+def _report(result: VerificationResult) -> None:
+    """A human-readable summary before the machine-readable JSON."""
+    print(f"\nDecision: {result.decision.value}")
+    if result.obligations:
+        print("Obligations:")
+        for obligation in result.obligations:
+            marker = {
+                "satisfied": "ok  ",
+                "violated": "FAIL",
+                "unproven": "????",
+                "not_applicable": "--  ",
+            }.get(obligation.get("status", ""), "    ")
+            print(f"  [{marker}] {obligation.get('kind')}: {obligation.get('statement')}")
+            detail = obligation.get("detail", "")
+            if detail:
+                print(f"          {detail}")
+    if result.evidence_hashes:
+        print(f"Evidence hashes: {len(result.evidence_hashes)}")
+        for digest in result.evidence_hashes:
+            print(f"  {digest}")
+    if result.committed:
+        print(f"Committed: {result.edge_record_payload_hash}")
+    print()
 
 
 async def cmd_audit(args: argparse.Namespace) -> int:
-    db_path = os.environ.get(
-        "EL_VERIFICADOR_DB", str(Path.home() / ".edgerecord" / "ledger.sqlite")
-    )
+    config = load_config()
+    db_path = os.environ.get("EL_VERIFICADOR_DB", config.edgerecord_db)
     logger = EdgeRecordLogger(db_path)
     if args.verify_chain:
         ok = logger.verify_chain()
@@ -168,8 +247,8 @@ async def cmd_audit(args: argparse.Namespace) -> int:
 
 
 async def cmd_config(args: argparse.Namespace) -> int:
-    target = Path.home() / ".el-verificador" / "config.yaml"
     if args.init:
+        target = DEFAULT_CONFIG_PATH
         target.parent.mkdir(parents=True, exist_ok=True)
         import shutil
 
@@ -177,16 +256,12 @@ async def cmd_config(args: argparse.Namespace) -> int:
         shutil.copy(example, target)
         print(f"Config written to {target}")
         return 0
-    print("Use --init to create a default config file")
+    if args.show:
+        print(json.dumps(load_config().model_dump(mode="json"), indent=2))
+        return 0
+    print("Use --init to create a default config file, or --show to print it")
     return 0
 
 
-def run() -> int:
-    try:
-        return asyncio.run(main())
-    except KeyboardInterrupt:
-        return 130
-
-
 if __name__ == "__main__":
-    sys.exit(run())
+    sys.exit(main())

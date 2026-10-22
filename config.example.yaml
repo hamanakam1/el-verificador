@@ -1,9 +1,14 @@
 # El Verificador Configuration
-# Copy to ~/.el-verificador/config.yaml and customize
+# Copy to ~/.el-verificador/config.yaml and customize.
+#
+# The default location is read automatically; `--config <path>` overrides it.
+# Every key here is validated against VerificationConfig, so an unknown key is
+# an error rather than a silently ignored line.
 
-# Ollama / Local LLM (used to build Correction Prompts)
+# Ollama / Local LLM (used to add an analysis to Correction Prompts).
+# The verdict itself never depends on the model.
 ollama_base_url: "http://127.0.0.1:11434"
-model: "qwen2.5:14b"
+model: "qwen3.8:latest"
 model_temperature: 0.1
 model_timeout: 60
 
@@ -22,17 +27,27 @@ test_commands:
   - "ruff check ."
   - "bandit -r . -q"
 
+# Recorded acceptance results, replayed instead of executing commands.
+# Only used when the checks cannot run. Format:
+#   {"checks": [{"command": "pytest -q", "exit_code": 0, "stdout": "", "stderr": ""}]}
+check_fixture: null
+
 # Guardrails
 max_retries: 3
 max_retry_duration_ms: 600000
 
-# Semantic diff / intent alignment
+# Intent alignment
+# Minimum fraction of applicable obligations that must be satisfied.
 intent_coverage_threshold: 0.85
 fail_on_todo_stubs: true
+# How a change outside the work package's related_files is treated:
+# "off" | "warn" (reported, not blocking) | "enforce" (blocking)
+scope_mode: "warn"
 
 # Git
 commit_branch: "main"
 commit_message_prefix: "feat(el-verificador):"
 
-# Dry-run: skip Docker/git/EdgeRecord writes for offline testing
+# Dry-run: do not write anything and do not execute acceptance commands.
+# Acceptance commands are never executed on the host in any mode.
 dry_run: false

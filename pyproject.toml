@@ -57,13 +57,31 @@ disallow_untyped_defs = true
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# The golden fixture suite contains synthetic repositories that are meant to
+# contain stubs and unused imports. They are data, not source.
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+# E/F/W are correctness. I is import hygiene. UP is pyupgrade, minus the
+# rules the codebase has never met: it uses `typing.List` / `typing.Optional`
+# consistently, and a PEP 585/604 migration is a separate mechanical change
+# rather than something to slip in with a feature commit.
 select = ["E", "F", "I", "UP", "W"]
-ignore = ["E501"]
+ignore = [
+    "E501",
+    "UP006",   # non-pep585-annotation (typing.List -> list)
+    "UP007",   # non-pep604-annotation-union (Optional[X] -> X | None)
+    "UP035",   # deprecated-import (typing.List -> collections.abc)
+    "UP037",   # quoted-annotation
+    "UP042",   # replace-str-enum (class X(str, Enum) is deliberate here)
+    "UP045",   # non-pep604-annotation-optional (Optional[X] -> X | None)
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+norecursedirs = ["tests/fixtures", "*.egg", ".*", "build", "dist"]
 addopts = "-v"
 
 [tool.coverage.run]
