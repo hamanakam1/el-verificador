@@ -16,6 +16,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import UTC
 from pathlib import Path
 
 from el_verificador.audit import ChainReport, chain_for, verify_ledger
@@ -24,6 +25,29 @@ from el_verificador.schemas import (
     VerificationAudit,
     VerificationDecision,
 )
+
+
+def _audit_fields() -> dict:
+    """The evidence-bearing fields of an audit record."""
+    fields = dict(
+        work_package_id="dwp-test-0001",
+        work_package_preview="Add a registration endpoint that validates the body",
+        repo_path="/tmp/repo",
+        decision=VerificationDecision.PASS,
+        attempts=1,
+        passed=True,
+        committed=True,
+        rationale="All acceptance checks passed and intent aligned",
+        key_evidence=["checks_passed=True", "intent_coverage=0.94"],
+    )
+    model = VerificationAudit.model_fields
+    if "evidence_hashes" in model:
+        fields["evidence_hashes"] = ["sha256:" + "0" * 64]
+    if "obligations" in model:
+        fields["obligations"] = [
+            {"kind": "symbol", "statement": "register_user exists", "status": "satisfied"}
+        ]
+    return fields
 
 
 def _audit(
@@ -106,24 +130,20 @@ class TestAuditChain(unittest.TestCase):
                 self.assertNotEqual(_audit(**override).compute_hash(), baseline)
 
     def test_the_digest_is_stable_for_identical_content(self):
-        first = _audit()
+        """The same decision content must always hash to the same digest."""
+        from datetime import datetime
+
+        stamp = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+        first = VerificationAudit(
+            **{
+                **_audit_fields(),
+                "timestamp": stamp,
+            }
+        )
         second = VerificationAudit(
             **{
-                **{
-                    key: getattr(first, key)
-                    for key in (
-                        "work_package_id",
-                        "work_package_preview",
-                        "repo_path",
-                        "decision",
-                        "attempts",
-                        "passed",
-                        "committed",
-                        "rationale",
-                        "key_evidence",
-                        "timestamp",
-                    )
-                }
+                **_audit_fields(),
+                "timestamp": stamp,
             }
         )
         self.assertEqual(first.compute_hash(), second.compute_hash())

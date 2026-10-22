@@ -105,6 +105,7 @@ _IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _CAMEL_RE = re.compile(r"[A-Z]?[a-z0-9]+(?:[A-Z][a-z0-9]*)*")
 
 
+
 def significant_terms(text: str) -> List[str]:
     """Content words of a goal, lowercased, stopwords removed."""
     words = re.findall(r"[A-Za-z][A-Za-z0-9]{2,}", text.lower())

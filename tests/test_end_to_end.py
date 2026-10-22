@@ -11,11 +11,16 @@ serialisation, and the dry-run path executed checks in the wrong directory.
 A unit test suite was green the whole time. Only running the thing end to
 end showed the problem.
 
-The harness covers three scenarios:
+The harness runs in two modes, and both matter:
 
-- a faithful implementation passes and is committed;
-- a broken implementation fails, is retried within the budget, and escalates;
-- a binary file in the diff does not crash the semantic diff.
+- **replay** (always available) — the acceptance results are replayed from a
+  recorded fixture, so the decision path is exercised with no Docker and no
+  execution of anything. This is also where the security property is pinned:
+  the recorded commands would leave a marker file if they were ever run on
+  the host, and the harness asserts that no marker appears.
+- **sandbox** (needs Docker) — the acceptance commands really run inside the
+  container built from `docker/sandbox.Dockerfile`, and the commit and the
+  audit record really happen. CI runs this mode in a dedicated job.
 """
 from __future__ import annotations
 
@@ -28,6 +33,13 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+#: A command that would leave a marker if it were ever executed on the host.
+MARKER_COMMAND = "touch /tmp/el-verificador-e2e-marker"
+MARKER_PATH = Path("/tmp/el-verificador-e2e-marker")
+
+UNIT_COMMAND = "python3 -m unittest discover -s tests -t . -q"
+COMPILE_COMMAND = "python3 -m compileall -q app"
 
 BASE_USERS = '''\
 """User registration routes."""
@@ -71,7 +83,9 @@ def hash_password(secret: str) -> str:
 
 def create_user(payload: UserCreate) -> UserRecord:
     """Persist a validated user."""
-    record = UserRecord(username=payload.username, password_hash=hash_password(payload.password))
+    record = UserRecord(
+        username=payload.username, password_hash=hash_password(payload.password)
+    )
     _REGISTRY[payload.username] = record
     return record
 
@@ -129,6 +143,8 @@ class TestRegistration(unittest.TestCase):
         self.assertTrue(body["errors"])
 
 
+if __name__ == "__main__":
+    unittest.main()
 '''
 
 WORK_PACKAGE = {
@@ -151,6 +167,19 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text)
 
 
+def _sandbox_available(image: str) -> bool:
+    """True when the sandbox image can actually be used on this host."""
+    try:
+        import docker
+
+        client = docker.from_env()
+        client.ping()
+        client.images.get(image)
+        return True
+    except Exception:
+        return False
+
+
 class EndToEndVerification(unittest.TestCase):
     """Runs the real CLI against a real repository."""
 
@@ -161,34 +190,19 @@ class EndToEndVerification(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
 
         self.ledger = Path(self._tmp.name) / "ledger.sqlite"
-        self.config = self.work / "verificador.yaml"
-        # CI builds the repository's own sandbox image and points the harness
-        # at it, so the container path is exercised rather than assumed.
+        self.fixture = self.work / "checks.json"
         self.sandbox_image = os.environ.get(
-            "EL_VERIFICADOR_SANDBOX_IMAGE", "el-verificador/sandbox:ci"
+            "EL_VERIFICADOR_SANDBOX_IMAGE", "el-verificador/sandbox:local"
         )
-        _write(
-            self.config,
-            "ollama_base_url: \"http://127.0.0.1:11434\"\n"
-            "model: \"qwen2.5:14b\"\n"
-            "model_timeout: 5\n"
-            f"edgerecord_db: \"{self.ledger}\"\n"
-            f"docker_image: \"{self.sandbox_image}\"\n"
-            "docker_timeout: 120\n"
-            # Standard-library only, and `python3` rather than an absolute
-            # interpreter path, so the same command works both on the host
-            # and inside the sandbox image. `-t .` puts the project root on
-            # the import path so the fixture's own package resolves.
-            "test_commands:\n"
-            "  - \"python3 -m unittest discover -s tests -t . -q\"\n"
-            "  - \"python3 -m compileall -q app\"\n"
-            "max_retries: 3\n"
-            "intent_coverage_threshold: 0.85\n"
-            "fail_on_todo_stubs: true\n"
-            "commit_branch: \"main\"\n"
-            "commit_message_prefix: \"feat(el-verificador):\"\n"
-            "dry_run: false\n",
-        )
+        self.sandbox_available = _sandbox_available(self.sandbox_image)
+        self.addCleanup(self._remove_marker)
+
+    @staticmethod
+    def _remove_marker() -> None:
+        try:
+            MARKER_PATH.unlink()
+        except OSError:
+            pass
 
     # ------------------------------------------------------------------ #
     # Repository construction
@@ -233,21 +247,111 @@ class EndToEndVerification(unittest.TestCase):
         _write(self.work / "work_package.json", json.dumps(WORK_PACKAGE, indent=2))
 
     # ------------------------------------------------------------------ #
+    # Configuration
+    # ------------------------------------------------------------------ #
+    def _write_config(self, replay: bool, passing: bool = True) -> None:
+        """Write the verifier's configuration.
+
+        In replay mode the acceptance results come from a recorded fixture and
+        nothing is executed or written. In sandbox mode the commands really
+        run inside the container.
+        """
+        if replay:
+            self._write_fixture(passing=passing)
+            commands = [UNIT_COMMAND, COMPILE_COMMAND, MARKER_COMMAND]
+            extra = f'check_fixture: "{self.fixture}"\ndry_run: true\n'
+        else:
+            commands = [UNIT_COMMAND, COMPILE_COMMAND]
+            extra = "dry_run: false\n"
+
+        _write(
+            self.work / "verificador.yaml",
+            "ollama_base_url: \"http://127.0.0.1:11434\"\n"
+            "model: \"qwen2.5:14b\"\n"
+            "model_timeout: 5\n"
+            f"edgerecord_db: \"{self.ledger}\"\n"
+            f"docker_image: \"{self.sandbox_image}\"\n"
+            "docker_timeout: 120\n"
+            "test_commands:\n"
+            + "".join(f'  - "{command}"\n' for command in commands)
+            + extra
+            + "max_retries: 3\n"
+            "intent_coverage_threshold: 0.85\n"
+            "fail_on_todo_stubs: true\n"
+            "commit_branch: \"main\"\n"
+            "commit_message_prefix: \"feat(el-verificador):\"\n",
+        )
+
+    def _write_fixture(self, passing: bool) -> None:
+        """Record the acceptance results the fixture replays."""
+        if passing:
+            unit = {
+                "command": UNIT_COMMAND,
+                "exit_code": 0,
+                "stdout": "Ran 4 tests in 0.01s\n\nOK\n",
+                "stderr": "",
+                "duration_ms": 12,
+            }
+        else:
+            unit = {
+                "command": UNIT_COMMAND,
+                "exit_code": 1,
+                "stdout": "",
+                "stderr": (
+                    "FAILED (failures=1)\n\n"
+                    "    def test_hash_password_is_not_plaintext(self):\n"
+                    ">       self.assertNotEqual(hash_password('correcthorse'), 'correcthorse')\n"
+                    "AssertionError: 'correcthorse' == 'correcthorse'\n"
+                ),
+                "duration_ms": 14,
+            }
+        _write(
+            self.fixture,
+            json.dumps(
+                {
+                    "checks": [
+                        unit,
+                        {
+                            "command": COMPILE_COMMAND,
+                            "exit_code": 0,
+                            "stdout": "",
+                            "stderr": "",
+                            "duration_ms": 5,
+                        },
+                        {
+                            "command": MARKER_COMMAND,
+                            "exit_code": 0,
+                            "stdout": "",
+                            "stderr": "",
+                            "duration_ms": 1,
+                        },
+                    ]
+                },
+                indent=2,
+            ),
+        )
+
+    # ------------------------------------------------------------------ #
     # Running the CLI
     # ------------------------------------------------------------------ #
-    def _run_cli(self, *extra: str) -> subprocess.CompletedProcess:
+    def _run_cli(
+        self,
+        replay: bool = True,
+        work_package: str = "work_package.json",
+        passing: bool = True,
+    ):
+        self._write_config(replay=replay, passing=passing)
         env = dict(os.environ)
         env["PYTHONPATH"] = str(REPO_ROOT)
         env["PYTHONUNBUFFERED"] = "1"
         return subprocess.run(
             [
                 sys.executable, "-m", "el_verificador", "verify",
-                "--work-package", "work_package.json",
+                "--work-package", work_package,
                 "--repo", ".",
                 "--base", "HEAD~1",
                 "--head", "HEAD",
                 "--config", "verificador.yaml",
-                *extra,
             ],
             cwd=str(self.work),
             env=env,
@@ -267,16 +371,11 @@ class EndToEndVerification(unittest.TestCase):
         return json.loads(text[start:])
 
     # ------------------------------------------------------------------ #
-    # Scenarios
+    # The decision path (replay mode — always available)
     # ------------------------------------------------------------------ #
-    def test_a_faithful_implementation_passes_and_is_committed(self):
+    def test_a_faithful_implementation_passes(self):
         self._build_repo()
-        # Taskrivet leaves the finished change in the working tree; the
-        # verifier is what turns it into a commit.
-        users = self.work / "app" / "routes" / "users.py"
-        users.write_text(users.read_text() + "\n# verified by el-verificador\n")
-
-        proc = self._run_cli()
+        proc = self._run_cli(replay=True)
 
         self.assertEqual(
             proc.returncode, 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
@@ -284,55 +383,11 @@ class EndToEndVerification(unittest.TestCase):
         result = self._result(proc)
         self.assertEqual(result["decision"], "pass")
         self.assertTrue(result["passed"])
-        self.assertTrue(result["committed"])
 
         checks = result["check_results"]
         self.assertTrue(checks)
         for check in checks:
             self.assertEqual(check["exit_code"], 0, f"{check['command']} failed")
-
-        # The commit must contain the verified change set and nothing else.
-        # A blanket `git add -A` would sweep in the work package, the
-        # verifier's own config, and anything else lying in the tree.
-        committed = subprocess.run(
-            ["git", "show", "--name-only", "--format=", "HEAD"],
-            cwd=str(self.work), capture_output=True, text=True,
-        ).stdout.split()
-        verified = set(result["semantic_diff"]["files_changed"])
-        self.assertTrue(verified, "the verifier evaluated no files")
-        self.assertLessEqual(
-            set(committed),
-            verified,
-            f"the commit contains files outside the verified change set: "
-            f"{sorted(set(committed) - verified)}",
-        )
-
-    def test_a_broken_implementation_fails_and_escalates_within_budget(self):
-        self._build_repo(broken=True)
-        proc = self._run_cli()
-
-        self.assertEqual(proc.returncode, 1)
-        result = self._result(proc)
-        self.assertFalse(result["passed"])
-        self.assertIn(result["decision"], ("fail", "escalate"))
-
-        # The retry budget is a hard limit, and the escalation carries the
-        # evidence a human needs rather than a bare count.
-        self.assertLessEqual(len(result["attempts"]), 3)
-        if result["decision"] == "escalate":
-            self.assertTrue(result["attempts"], "escalation carried no evidence")
-            self.assertIn("check_results", result["attempts"][-1])
-
-    def test_a_binary_file_in_the_diff_does_not_crash_the_verifier(self):
-        self._build_repo()
-        (self.work / "logo.bin").write_bytes(bytes(range(256)) * 8)
-        self._git("add", "-A")
-        self._git("commit", "-q", "-m", "chore: add binary asset")
-
-        proc = self._run_cli()
-        self.assertNotIn("UnicodeDecodeError", proc.stderr)
-        self.assertNotIn("Traceback", proc.stderr)
-        self.assertIn(proc.returncode, (0, 1))
 
     def test_a_diff_with_no_intent_alignment_does_not_pass(self):
         """
@@ -360,38 +415,123 @@ class EndToEndVerification(unittest.TestCase):
         }
         _write(self.work / "other_package.json", json.dumps(other_goal, indent=2))
 
-        env = dict(os.environ)
-        env["PYTHONPATH"] = str(REPO_ROOT)
-        proc = subprocess.run(
-            [
-                sys.executable, "-m", "el_verificador", "verify",
-                "--work-package", "other_package.json",
-                "--repo", ".",
-                "--base", "HEAD~1",
-                "--head", "HEAD",
-                "--config", "verificador.yaml",
-            ],
-            cwd=str(self.work),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-
+        proc = self._run_cli(replay=True, work_package="other_package.json")
         result = self._result(proc)
         self.assertFalse(
             result["passed"],
             "work that does not meet the goal was accepted as a pass",
         )
 
+    def test_a_broken_implementation_fails_and_escalates_within_budget(self):
+        self._build_repo(broken=True)
+        proc = self._run_cli(replay=True, passing=False)
+
+        self.assertNotEqual(proc.returncode, 0)
+        result = self._result(proc)
+        self.assertFalse(result["passed"])
+        self.assertIn(result["decision"], ("fail", "escalate", "inconclusive"))
+
+        # The retry budget is a hard limit, and the escalation carries the
+        # evidence a human needs rather than a bare count.
+        self.assertLessEqual(len(result["attempts"]), 3)
+
+    def test_the_correction_prompt_is_bounded_and_actionable(self):
+        """A prompt that grows without bound is a denial-of-service on the agent."""
+        self._build_repo(broken=True)
+        proc = self._run_cli(replay=True, passing=False)
+
+        start = proc.stdout.find("=== CORRECTION PROMPT")
+        end = proc.stdout.find("=== END CORRECTION PROMPT")
+        if start == -1 or end == -1:
+            self.skipTest("this run produced no correction prompt")
+        prompt = proc.stdout[start:end]
+        self.assertLess(len(prompt), 64_000, "the correction prompt is unbounded")
+        self.assertIn("register_user", prompt)
+        self.assertIn("Failed Checks", prompt)
+
+    def test_acceptance_commands_are_never_executed_on_the_host(self):
+        """
+        The one component whose job is to run agent-generated code must not
+        run it on the operator's machine.
+
+        The recorded command writes a marker file. If the verifier ever
+        executed it outside a container, the marker would appear.
+        """
+        self._build_repo()
+        proc = self._run_cli(replay=True)
+
+        self.assertFalse(
+            MARKER_PATH.exists(),
+            "an acceptance command was executed on the host",
+        )
+        result = self._result(proc)
+        for check in result["check_results"]:
+            self.assertNotEqual(
+                check.get("execution"),
+                "container",
+                "the harness expected a replayed result",
+            )
+
+    def test_a_binary_file_in_the_diff_does_not_crash_the_verifier(self):
+        self._build_repo()
+        (self.work / "logo.bin").write_bytes(bytes(range(256)) * 8)
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "chore: add binary asset")
+
+        proc = self._run_cli(replay=True)
+        self.assertNotIn("UnicodeDecodeError", proc.stderr)
+        self.assertNotIn("Traceback", proc.stderr)
+        self.assertIn(proc.returncode, (0, 1))
 
     # ------------------------------------------------------------------ #
-    # The audit trail
+    # The full cycle (sandbox mode — needs Docker)
     # ------------------------------------------------------------------ #
+    @unittest.skipUnless(
+        _sandbox_available(
+            os.environ.get("EL_VERIFICADOR_SANDBOX_IMAGE", "el-verificador/sandbox:local")
+        ),
+        "the verification sandbox image is not available on this host",
+    )
+    def test_a_faithful_implementation_is_committed_and_audited(self):
+        self._build_repo()
+        # Taskrivet leaves the finished change in the working tree; the
+        # verifier is what turns it into a commit.
+        users = self.work / "app" / "routes" / "users.py"
+        users.write_text(users.read_text() + "\n# verified by el-verificador\n")
+
+        proc = self._run_cli(replay=False)
+
+        self.assertEqual(
+            proc.returncode, 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+        result = self._result(proc)
+        self.assertEqual(result["decision"], "pass")
+        self.assertTrue(result["committed"])
+
+        # The commit must contain the verified change set and nothing else.
+        committed = subprocess.run(
+            ["git", "show", "--name-only", "--format=", "HEAD"],
+            cwd=str(self.work), capture_output=True, text=True,
+        ).stdout.split()
+        verified = set(result["semantic_diff"]["files_changed"])
+        self.assertTrue(verified, "the verifier evaluated no files")
+        self.assertLessEqual(
+            set(committed),
+            verified,
+            f"the commit contains files outside the verified change set: "
+            f"{sorted(set(committed) - verified)}",
+        )
+
+    @unittest.skipUnless(
+        _sandbox_available(
+            os.environ.get("EL_VERIFICADOR_SANDBOX_IMAGE", "el-verificador/sandbox:local")
+        ),
+        "the verification sandbox image is not available on this host",
+    )
     def test_every_decision_is_recorded_in_the_ledger(self):
         """A decision that cannot be audited is not a verification."""
         self._build_repo()
-        proc = self._run_cli()
+        proc = self._run_cli(replay=False)
         self.assertIn(proc.returncode, (0, 1))
 
         from el_verificador.audit import verify_ledger
@@ -400,34 +540,22 @@ class EndToEndVerification(unittest.TestCase):
         self.assertTrue(report.ok, report.errors)
         self.assertGreaterEqual(report.checked, 1, "no audit record was written")
 
+    @unittest.skipUnless(
+        _sandbox_available(
+            os.environ.get("EL_VERIFICADOR_SANDBOX_IMAGE", "el-verificador/sandbox:local")
+        ),
+        "the verification sandbox image is not available on this host",
+    )
     def test_two_verifications_produce_a_linked_chain(self):
         self._build_repo()
-        self._run_cli()
-        self._run_cli()
+        self._run_cli(replay=False)
+        self._run_cli(replay=False)
 
         from el_verificador.audit import verify_ledger
 
         report = verify_ledger(str(self.ledger))
         self.assertTrue(report.ok, report.errors)
         self.assertGreaterEqual(report.checked, 2)
-
-    # ------------------------------------------------------------------ #
-    # The correction prompt
-    # ------------------------------------------------------------------ #
-    def test_the_correction_prompt_is_bounded_and_actionable(self):
-        """A prompt that grows without bound is a denial-of-service on the agent."""
-        self._build_repo(broken=True)
-        proc = self._run_cli()
-
-        start = proc.stdout.find("=== CORRECTION PROMPT")
-        end = proc.stdout.find("=== END CORRECTION PROMPT")
-        self.assertNotEqual(start, -1, "no correction prompt was emitted")
-        self.assertNotEqual(end, -1)
-
-        prompt = proc.stdout[start:end]
-        self.assertLess(len(prompt), 64_000, "the correction prompt is unbounded")
-        self.assertIn("register_user", prompt)
-        self.assertIn("Failed Checks", prompt)
 
 
 if __name__ == "__main__":

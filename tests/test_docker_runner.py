@@ -16,7 +16,6 @@ from pathlib import Path
 from unittest import mock
 
 import docker
-
 from el_verificador.docker_runner import (
     ContainerHandle,
     DockerRunner,
