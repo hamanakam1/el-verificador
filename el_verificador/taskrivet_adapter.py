@@ -22,7 +22,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from .schemas import CorrectionPrompt, IntentPackage
 
@@ -250,7 +250,9 @@ class TaskrivetAdapter:
     # ------------------------------------------------------------------ #
     # Verification-driven helpers
     # ------------------------------------------------------------------ #
-    def ensure_task_from_intent(self, intent: IntentPackage) -> Dict[str, Any]:
+    def ensure_task_from_intent(
+        self, intent: Union[IntentPackage, Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
         Create the Taskrivet task from a distilled work package.
 
@@ -258,6 +260,8 @@ class TaskrivetAdapter:
         Taskrivet task's acceptance contract, so the two systems agree on
         what "done" means.
         """
+        if isinstance(intent, dict):
+            intent = IntentPackage.from_dict(intent)
         acceptance = (
             intent.acceptance_criteria
             or "; ".join(intent.acceptance_commands)
@@ -357,4 +361,59 @@ class TaskrivetAdapter:
         return _retry
 
 
-__all__ = ["TaskrivetAdapter", "TaskrivetError"]
+# ============================================================================
+# CLI INTEGRATION
+# ============================================================================
+
+def add_taskrivet_arguments(parser: Any) -> None:
+    """Register the Taskrivet integration flags on an argument parser."""
+    parser.add_argument(
+        "--taskrivet-db",
+        default=None,
+        help="Path to the Taskrivet ledger (enables the Taskrivet integration)",
+    )
+    parser.add_argument(
+        "--taskrivet-task",
+        default=None,
+        help="Taskrivet task id that records this verification",
+    )
+    parser.add_argument(
+        "--taskrivet-owner",
+        default="el-verificador",
+        help="Owner recorded on the Taskrivet session",
+    )
+    parser.add_argument(
+        "--taskrivet-scope",
+        action="append",
+        default=None,
+        help="Resource key for conflict detection (repeatable)",
+    )
+
+
+def adapter_from_args(args: Any) -> Optional[TaskrivetAdapter]:
+    """
+    Build a Taskrivet adapter from parsed CLI arguments.
+
+    Returns None when the integration was not requested, so the caller keeps
+    its existing behaviour unchanged.
+    """
+    db_path = getattr(args, "taskrivet_db", None)
+    task_id = getattr(args, "taskrivet_task", None)
+    if not db_path or not task_id:
+        return None
+
+    scope = list(getattr(args, "taskrivet_scope", None) or [])
+    return TaskrivetAdapter(
+        db_path=db_path,
+        task_id=task_id,
+        owner=getattr(args, "taskrivet_owner", None) or "el-verificador",
+        scope=scope or None,
+    )
+
+
+__all__ = [
+    "TaskrivetAdapter",
+    "TaskrivetError",
+    "add_taskrivet_arguments",
+    "adapter_from_args",
+]

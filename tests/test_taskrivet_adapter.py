@@ -19,7 +19,12 @@ from el_verificador.schemas import (
     CorrectionPrompt,
     IntentPackage,
 )
-from el_verificador.taskrivet_adapter import TaskrivetAdapter, TaskrivetError
+from el_verificador.taskrivet_adapter import (
+    TaskrivetAdapter,
+    TaskrivetError,
+    adapter_from_args,
+    add_taskrivet_arguments,
+)
 
 TASKRIVET_REPO = Path.home() / "Projects" / "taskrivet"
 
@@ -181,6 +186,65 @@ class TestTaskrivetAdapterCalls(unittest.TestCase):
         adapter = _FakeAdapter(db_path="/tmp/unused.sqlite", task_id="")
         with self.assertRaises(TaskrivetError):
             adapter.ensure_task("obj", "acc")
+
+
+class TestTaskrivetCLIArguments(unittest.TestCase):
+    """The CLI flags must build an adapter, and stay inert when unused."""
+
+    def test_arguments_registered(self):
+        import argparse
+
+        from el_verificador.taskrivet_adapter import add_taskrivet_arguments
+
+        parser = argparse.ArgumentParser()
+        add_taskrivet_arguments(parser)
+        args = parser.parse_args(
+            ["--taskrivet-db", "/tmp/ledger.sqlite", "--taskrivet-task", "T-1"]
+        )
+        self.assertEqual(args.taskrivet_db, "/tmp/ledger.sqlite")
+        self.assertEqual(args.taskrivet_task, "T-1")
+        self.assertEqual(args.taskrivet_owner, "el-verificador")
+
+    def test_adapter_from_args_requires_db_and_task(self):
+        import argparse
+
+        from el_verificador.taskrivet_adapter import add_taskrivet_arguments
+
+        parser = argparse.ArgumentParser()
+        add_taskrivet_arguments(parser)
+
+        self.assertIsNone(adapter_from_args(parser.parse_args([])))
+        self.assertIsNone(
+            adapter_from_args(parser.parse_args(["--taskrivet-db", "/tmp/x.sqlite"]))
+        )
+        self.assertIsNone(
+            adapter_from_args(parser.parse_args(["--taskrivet-task", "T-1"]))
+        )
+
+    def test_adapter_from_args_builds_adapter(self):
+        import argparse
+
+        from el_verificador.taskrivet_adapter import add_taskrivet_arguments
+
+        parser = argparse.ArgumentParser()
+        add_taskrivet_arguments(parser)
+        args = parser.parse_args(
+            [
+                "--taskrivet-db",
+                "/tmp/ledger.sqlite",
+                "--taskrivet-task",
+                "T-1",
+                "--taskrivet-scope",
+                "repo/a",
+                "--taskrivet-scope",
+                "repo/b",
+            ]
+        )
+        adapter = adapter_from_args(args)
+        self.assertIsNotNone(adapter)
+        self.assertEqual(adapter.task_id, "T-1")
+        self.assertEqual(adapter.scope, ["repo/a", "repo/b"])
+        self.assertTrue(adapter.db_path.endswith("ledger.sqlite"))
 
 
 @unittest.skipUnless(

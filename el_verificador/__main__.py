@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from .engine import ElVerificador
+from .taskrivet_adapter import adapter_from_args, add_taskrivet_arguments
 from .schemas import EdgeRecordLogger, VerificationConfig
 
 
@@ -34,6 +35,8 @@ def create_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument(
         "--dry-run", action="store_true", help="Skip Docker/git/EdgeRecord writes"
     )
+
+    add_taskrivet_arguments(verify_parser)
 
     audit_parser = subparsers.add_parser(
         "audit", help="Query verification audit log"
@@ -94,12 +97,23 @@ async def cmd_verify(args: argparse.Namespace, config: VerificationConfig) -> in
 
     verifier = ElVerificador(config)
 
-    def taskrivet_retry(prompt):  # noqa: ARG001
-        # In a fully autonomous deployment this hands the Correction Prompt
-        # back to Taskrivet. CLI mode: report it and let the operator decide.
-        print("\n=== CORRECTION PROMPT (hand back to Taskrivet) ===\n")
-        print(prompt.render())
-        print("=== END CORRECTION PROMPT ===\n")
+    adapter = adapter_from_args(args)
+    if adapter is not None:
+        # Record the verification in Taskrivet's own ledger. The task is
+        # seeded from the work package's acceptance contract, and every
+        # Correction Prompt is handed back as task context so Taskrivet can
+        # pick the work up again.
+        adapter.ensure_task_from_intent(work_package)
+        adapter.start_session()
+        taskrivet_retry = adapter.retry_callback()
+    else:
+
+        def taskrivet_retry(prompt):  # noqa: ARG001
+            # No Taskrivet ledger configured: report the prompt and let the
+            # operator decide what to do next.
+            print("\n=== CORRECTION PROMPT (hand back to Taskrivet) ===\n")
+            print(prompt.render())
+            print("=== END CORRECTION PROMPT ===\n")
 
     result = await verifier.verify(
         work_package,
@@ -108,6 +122,14 @@ async def cmd_verify(args: argparse.Namespace, config: VerificationConfig) -> in
         args.head,
         taskrivet_retry=taskrivet_retry,
     )
+
+    if adapter is not None and result.passed:
+        adapter.apply_pass(
+            evidence=(
+                "Verification passed for "
+                f"{work_package.get('id', 'work package')}"
+            )
+        )
 
     print(json.dumps(result.model_dump(mode="json"), indent=2))
     return 0 if result.passed else 1
