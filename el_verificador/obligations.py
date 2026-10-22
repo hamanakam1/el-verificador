@@ -182,10 +182,11 @@ class ObligationEvaluator:
         intent: IntentPackage,
         diff: SemanticDiff,
         check_results: Sequence[CheckResult],
+        acceptance_source: str = "config",
     ) -> List[Obligation]:
         obligations: List[Obligation] = []
         obligations.extend(self._change_present(diff))
-        obligations.extend(self._acceptance_commands(check_results))
+        obligations.extend(self._acceptance_commands(check_results, acceptance_source))
         obligations.extend(self._no_stub(diff))
         obligations.extend(self._tests_intact(diff))
         obligations.extend(self._scope_respected(intent, diff))
@@ -219,20 +220,21 @@ class ObligationEvaluator:
         ]
 
     def _acceptance_commands(
-        self, check_results: Sequence[CheckResult]
+        self, check_results: Sequence[CheckResult], acceptance_source: str
     ) -> List[Obligation]:
         obligations: List[Obligation] = []
         for index, check in enumerate(check_results):
             command = check.command
+            origin = f" (from {acceptance_source})"
             if not check.executed:
                 status = ObligationStatus.UNPROVEN
-                detail = f"`{command}` did not run, so it carries no result"
+                detail = f"`{command}` did not run, so it carries no result{origin}"
             elif check.passed:
                 status = ObligationStatus.SATISFIED
-                detail = f"`{command}` exited 0"
+                detail = f"`{command}` exited 0{origin}"
             else:
                 status = ObligationStatus.VIOLATED
-                detail = f"`{command}` exited {check.exit_code}"
+                detail = f"`{command}` exited {check.exit_code}{origin}"
             obligations.append(
                 Obligation(
                     id=f"acceptance_command_{index}",

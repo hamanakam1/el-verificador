@@ -23,8 +23,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+from .acceptance import AcceptanceContract, resolve_acceptance
 from .correction import CorrectionLoop, RetryExhausted
 from .docker_runner import DockerRunner
+from .evidence import (
+    EvidenceArtifact,
+    EvidenceKind,
+    EvidenceStore,
+    summarise_diff,
+)
 from .git_ops import GitOps
 from .obligations import ObligationEvaluator, coverage, decide
 from .ollama_client import OllamaClient
@@ -69,6 +76,7 @@ class ElVerificador:
             ),
         )
         self._model_calls = 0
+        self.acceptance_contract: Optional[AcceptanceContract] = None
 
     # ------------------------------------------------------------------ #
     # Public entry point
@@ -164,8 +172,14 @@ class ElVerificador:
         base_commit: str,
         head_commit: str,
     ) -> VerificationResult:
+        # Stage 0: resolve what "done" means for this work package. The
+        # commands come from the work package's own acceptance contract when
+        # it has one, and from the configured default when it does not.
+        contract = resolve_acceptance(intent, self.config)
+        self.acceptance_contract = contract
+
         # Stage 1: Independent acceptance testing inside the sandbox
-        check_results = self.deps.docker.run_all()
+        check_results = self.deps.docker.run_all(commands=contract.commands)
 
         # Stage 2: Semantic diff / intent alignment
         diff_engine = SemanticDiffEngine(repo_path, base_commit, head_commit)
@@ -173,7 +187,12 @@ class ElVerificador:
 
         # Stage 3: Resolve the intent into obligations and decide on them.
         evaluator = ObligationEvaluator(scope_mode=self.config.scope_mode)
-        obligations = evaluator.evaluate(intent, semantic_diff, check_results)
+        obligations = evaluator.evaluate(
+            intent,
+            semantic_diff,
+            check_results,
+            acceptance_source=contract.source.value,
+        )
         semantic_diff.intent_coverage = coverage(obligations)
         decision = decide(obligations)
 
@@ -188,6 +207,13 @@ class ElVerificador:
             for o in obligations
         ]
 
+        # Stage 4: seal the evidence. The decision rests on these bytes, so
+        # they are written to the content-addressed store before the verdict
+        # is recorded, and the record cites their hashes.
+        artifacts = self._seal_evidence(
+            check_results, semantic_diff, obligation_records, contract
+        )
+
         return VerificationResult(
             work_package_id=intent.id,
             repo_path=repo_path,
@@ -197,9 +223,94 @@ class ElVerificador:
             check_results=check_results,
             semantic_diff=semantic_diff,
             obligations=obligation_records,
-            evidence_hashes=self._evidence_hashes(check_results, semantic_diff),
+            evidence_hashes=[a.sha256 for a in artifacts],
+            evidence_artifacts=[a.model_dump(mode="json") for a in artifacts],
             passed=decision == VerificationDecision.PASS,
         )
+
+    # ------------------------------------------------------------------ #
+    # Evidence
+    # ------------------------------------------------------------------ #
+    def _seal_evidence(
+        self,
+        check_results: Sequence[CheckResult],
+        semantic_diff: Optional[SemanticDiff],
+        obligations: List[Dict[str, Any]],
+        contract: Any,
+    ) -> List[EvidenceArtifact]:
+        """Write the evidence the decision rests on, and return the artifacts.
+
+        The store is content-addressed, so identical evidence lands in the
+        same place rather than accumulating copies, and every artifact can be
+        re-hashed to prove it is the bytes the decision was made from.
+        """
+        artifacts: List[EvidenceArtifact] = []
+        store = EvidenceStore(self.config.evidence_root)
+
+        for check in check_results:
+            label = check.command
+            if check.stdout:
+                artifacts.append(
+                    store.write_text(
+                        EvidenceKind.CHECK_STDOUT, check.stdout, label=label
+                    )
+                )
+            if check.stderr:
+                artifacts.append(
+                    store.write_text(
+                        EvidenceKind.CHECK_STDERR, check.stderr, label=label
+                    )
+                )
+            artifacts.append(
+                store.write_json(
+                    EvidenceKind.CHECK_RESULT,
+                    {
+                        "kind": check.kind.value,
+                        "command": check.command,
+                        "exit_code": check.exit_code,
+                        "execution": check.execution.value,
+                        "duration_ms": check.duration_ms,
+                        "passed": check.passed,
+                    },
+                    label=label,
+                )
+            )
+
+        if semantic_diff is not None:
+            artifacts.append(
+                store.write_json(
+                    EvidenceKind.AST_SUMMARY,
+                    summarise_diff(semantic_diff),
+                    label="semantic diff",
+                )
+            )
+
+        artifacts.append(
+            store.write_json(
+                EvidenceKind.OBLIGATION_TRACE,
+                {"obligations": obligations},
+                label="resolved obligations",
+            )
+        )
+
+        artifacts.append(
+            store.write_json(
+                EvidenceKind.SANDBOX_META,
+                {
+                    "image": self.config.docker_image,
+                    "workdir": self.config.docker_workdir,
+                    "network_enabled": self.config.docker_network_enabled,
+                    "memory_limit_mb": self.config.docker_memory_limit_mb,
+                    "cpu_limit": self.config.docker_cpu_limit,
+                    "pids_limit": self.config.docker_pids_limit,
+                    "check_timeout_s": self.config.docker_timeout,
+                    "acceptance_commands": list(contract.commands),
+                    "acceptance_source": contract.source.value,
+                },
+                label="sandbox",
+            )
+        )
+        return artifacts
 
     # ------------------------------------------------------------------ #
     # Finalization: commit, teardown, EdgeRecord audit payload
@@ -249,49 +360,6 @@ class ElVerificador:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
-    @staticmethod
-    def _evidence_hashes(
-        check_results: Sequence[CheckResult], semantic_diff: Optional[SemanticDiff]
-    ) -> List[str]:
-        """Content hashes of the evidence the decision rests on.
-
-        The hash of each check's output binds the audit record to the bytes
-        that were actually produced, so a later reader can prove the verdict
-        was made from this evidence and not from something else.
-        """
-        import hashlib
-
-        hashes: List[str] = []
-        for check in check_results:
-            if not check.executed:
-                continue
-            digest = hashlib.sha256()
-            digest.update(check.kind.value.encode())
-            digest.update(b"\0")
-            digest.update(check.command.encode())
-            digest.update(b"\0")
-            digest.update(str(check.exit_code).encode())
-            digest.update(b"\0")
-            digest.update(check.stdout.encode(errors="replace"))
-            digest.update(b"\0")
-            digest.update(check.stderr.encode(errors="replace"))
-            hashes.append(digest.hexdigest())
-
-        if semantic_diff is not None and semantic_diff.files_changed:
-            digest = hashlib.sha256()
-            digest.update("|".join(sorted(semantic_diff.files_changed)).encode())
-            digest.update(b"\0")
-            digest.update(
-                "|".join(
-                    sorted(
-                        f"{c.file_path}:{c.name}:{c.change_type.value}"
-                        for c in semantic_diff.ast_changes
-                    )
-                ).encode()
-            )
-            hashes.append(digest.hexdigest())
-        return hashes
-
     def _build_audit(
         self,
         intent: IntentPackage,
@@ -335,6 +403,12 @@ class ElVerificador:
             if result.semantic_diff
             else "no_diff",
             f"committed={result.committed}",
+            f"acceptance_source={self.acceptance_contract.source.value}"
+            if self.acceptance_contract
+            else "acceptance_source=config",
+            f"acceptance_commands={len(self.acceptance_contract.commands)}"
+            if self.acceptance_contract
+            else "",
         ]
         for obligation in blocking:
             key_evidence.append(
@@ -352,6 +426,7 @@ class ElVerificador:
             rationale=rationale,
             key_evidence=key_evidence,
             evidence_hashes=list(result.evidence_hashes),
+            evidence_artifacts=list(result.evidence_artifacts),
             obligations=list(result.obligations),
             total_duration_ms=total_duration_ms,
             model_calls=self._model_calls,

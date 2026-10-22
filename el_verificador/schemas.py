@@ -375,6 +375,10 @@ class VerificationResult(BaseModel):
         default_factory=list,
         description="Content hashes of the evidence the decision rests on",
     )
+    evidence_artifacts: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="The stored evidence artifacts: path, bytes and hash",
+    )
     passed: bool = False
     committed: bool = False
     edge_record_payload_hash: Optional[str] = None
@@ -425,6 +429,7 @@ class VerificationAudit(BaseModel):
     # The evidence this decision rests on. Every entry is a content hash of a
     # sealed artifact, so the audit record attests to bytes and not to prose.
     evidence_hashes: List[str] = Field(default_factory=list)
+    evidence_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
     obligations: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Resolved obligations: kind, status and detail",
@@ -469,6 +474,7 @@ class VerificationAudit(BaseModel):
                 "rationale": self.rationale,
                 "key_evidence": list(self.key_evidence),
                 "evidence_hashes": list(self.evidence_hashes),
+                "evidence_artifacts": list(self.evidence_artifacts),
                 "obligations": list(self.obligations),
                 "timestamp": self.timestamp.isoformat(),
             },
@@ -707,11 +713,23 @@ class VerificationConfig(BaseModel):
     # EdgeRecord
     edgerecord_db: str = "~/.edgerecord/ledger.sqlite"
 
+    # Content-addressed evidence store. A hash that points at bytes nobody
+    # kept is a receipt, not a proof.
+    evidence_root: str = "~/.el-verificador/evidence"
+
     # Docker sandbox
-    docker_image: str = "taskrivet/sandbox:latest"
+    docker_image: str = "el-verificador/sandbox:local"
     docker_workdir: str = "/workspace"
     docker_timeout: int = 300
     docker_remove_on_teardown: bool = True
+    # Resource caps for the sandbox. Untrusted code runs here, so the limits
+    # are part of the isolation contract and not a convenience.
+    docker_memory_limit_mb: int = 2048
+    docker_cpu_limit: float = 2.0
+    docker_pids_limit: int = 512
+    # The sandbox has no network. A test that genuinely needs one must say so
+    # explicitly, and the exception is recorded in the receipt.
+    docker_network_enabled: bool = False
 
     # Acceptance test commands (run inside the container, in order)
     test_commands: List[str] = Field(

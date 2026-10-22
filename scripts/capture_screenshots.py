@@ -154,7 +154,7 @@ def build_demo_repo(work: Path, venv_python: Path, broken: bool) -> None:
         "model_temperature: 0.1\n"
         "model_timeout: 60\n"
         "edgerecord_db: \"~/.edgerecord/ledger.sqlite\"\n"
-        "docker_image: \"taskrivet/sandbox:latest\"\n"
+        "docker_image: \"el-verificador/sandbox:local\"\n"
         "docker_workdir: \"/workspace\"\n"
         "docker_timeout: 300\n"
         "docker_remove_on_teardown: true\n"

@@ -16,10 +16,18 @@ model_timeout: 60
 edgerecord_db: "~/.edgerecord/ledger.sqlite"
 
 # Docker sandbox
-docker_image: "taskrivet/sandbox:latest"
+# Build the image first: ./scripts/build_sandbox_image.sh
+docker_image: "el-verificador/sandbox:local"
 docker_workdir: "/workspace"
 docker_timeout: 300
 docker_remove_on_teardown: true
+# Resource caps for the sandbox. Untrusted code runs here.
+docker_memory_limit_mb: 2048
+docker_cpu_limit: 2.0
+docker_pids_limit: 512
+# The sandbox has no network by default. A test that genuinely needs one must
+# say so explicitly, and the exception is recorded in the receipt.
+docker_network_enabled: false
 
 # Acceptance test commands (run inside the container, in order)
 test_commands:

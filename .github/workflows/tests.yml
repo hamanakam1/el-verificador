@@ -48,3 +48,24 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -e '.[dev]'
       - run: python -m pytest tests/test_golden_fixtures.py -v
+
+  sandbox:
+    # The acceptance checks, for real, inside the container. The dry-run path
+    # cannot prove this: the non-dry-run path shipped broken for four
+    # commits because only dry-run mode was ever exercised.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - name: build the verification sandbox image
+        run: ./scripts/build_sandbox_image.sh
+      - name: run the acceptance checks inside the sandbox
+        run: python scripts/sandbox_smoke_test.py
+      - name: record the image digest
+        run: |
+          docker image inspect el-verificador/sandbox:local \
+            --format '{{.Id}}' > sandbox-image-digest.txt
+          cat sandbox-image-digest.txt

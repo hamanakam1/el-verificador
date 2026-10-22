@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from el_verificador.engine import ElVerificador, VerifierDependencies
+from el_verificador.evidence import EvidenceArtifact
 from el_verificador.schemas import (
     CheckExecution,
     CheckKind,
@@ -85,7 +86,7 @@ class _FakeDocker:
     def teardown(self):
         self.teardown_called = True
 
-    def run_all(self):
+    def run_all(self, commands=None):
         return list(self.results)
 
     def run_check(self, kind, command):
@@ -179,6 +180,35 @@ class TestEngineDecisions(unittest.TestCase):
             o.get("detail", "") for o in result.obligations if o["status"] == "violated"
         )
         self.assertIn("create_user_route", detail)
+
+    def test_the_audit_carries_artifacts_that_verify(self):
+        """A hash that points at bytes nobody kept is a receipt, not a proof."""
+
+        check = CheckResult(
+            kind=CheckKind.UNIT_TESTS,
+            command="pytest -q",
+            exit_code=0,
+            stdout="ok",
+            execution=CheckExecution.CONTAINER,
+        )
+        verifier, _ = self._make_verifier([check])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            repo, base, head, _ = _repo_for("correct_impl", tmp)
+            config = VerificationConfig(
+                dry_run=True, scope_mode="enforce",
+                evidence_root=str(tmp / "evidence"),
+            )
+            verifier = ElVerificador(config, deps=verifier.deps)
+            result = asyncio.run(
+                verifier.verify(self.work_package, str(repo), base, head)
+            )
+            # Inside the temporary directory: the evidence lives there, and
+            # a hash that points at deleted bytes proves nothing.
+            self.assertTrue(result.evidence_artifacts)
+            for record in result.evidence_artifacts:
+                artifact = EvidenceArtifact.model_validate(record)
+                self.assertTrue(artifact.verify(), artifact.path)
 
     def test_every_decision_cites_evidence(self):
         check = CheckResult(

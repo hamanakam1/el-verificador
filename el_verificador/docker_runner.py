@@ -108,7 +108,14 @@ class DockerRunner:
                 remove=self.config.docker_remove_on_teardown,
                 volumes={repo_path: {"bind": self.config.docker_workdir, "mode": "rw"}},
                 working_dir=self.config.docker_workdir,
-                network_disabled=True,
+                network_disabled=not self.config.docker_network_enabled,
+                # Resource caps are part of the isolation contract: the sandbox
+                # runs untrusted code, so a runaway process must not be able
+                # to take the host with it.
+                mem_limit=self.config.docker_memory_limit_mb * 1024 * 1024,
+                memswap_limit=self.config.docker_memory_limit_mb * 1024 * 1024,
+                nano_cpus=int(self.config.docker_cpu_limit * 1_000_000_000),
+                pids_limit=self.config.docker_pids_limit,
             )
         except docker.errors.ImageNotFound as exc:
             raise SandboxUnavailableError(
