@@ -129,8 +129,6 @@ class TestRegistration(unittest.TestCase):
         self.assertTrue(body["errors"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 '''
 
 WORK_PACKAGE = {
@@ -273,6 +271,11 @@ class EndToEndVerification(unittest.TestCase):
     # ------------------------------------------------------------------ #
     def test_a_faithful_implementation_passes_and_is_committed(self):
         self._build_repo()
+        # Taskrivet leaves the finished change in the working tree; the
+        # verifier is what turns it into a commit.
+        users = self.work / "app" / "routes" / "users.py"
+        users.write_text(users.read_text() + "\n# verified by el-verificador\n")
+
         proc = self._run_cli()
 
         self.assertEqual(
@@ -289,12 +292,20 @@ class EndToEndVerification(unittest.TestCase):
             self.assertEqual(check["exit_code"], 0, f"{check['command']} failed")
 
         # The commit must contain the verified change set and nothing else.
+        # A blanket `git add -A` would sweep in the work package, the
+        # verifier's own config, and anything else lying in the tree.
         committed = subprocess.run(
             ["git", "show", "--name-only", "--format=", "HEAD"],
             cwd=str(self.work), capture_output=True, text=True,
         ).stdout.split()
-        self.assertIn("app/routes/users.py", committed)
-        self.assertNotIn("work_package.json", committed)
+        verified = set(result["semantic_diff"]["files_changed"])
+        self.assertTrue(verified, "the verifier evaluated no files")
+        self.assertLessEqual(
+            set(committed),
+            verified,
+            f"the commit contains files outside the verified change set: "
+            f"{sorted(set(committed) - verified)}",
+        )
 
     def test_a_broken_implementation_fails_and_escalates_within_budget(self):
         self._build_repo(broken=True)
@@ -372,6 +383,51 @@ class EndToEndVerification(unittest.TestCase):
             result["passed"],
             "work that does not meet the goal was accepted as a pass",
         )
+
+
+    # ------------------------------------------------------------------ #
+    # The audit trail
+    # ------------------------------------------------------------------ #
+    def test_every_decision_is_recorded_in_the_ledger(self):
+        """A decision that cannot be audited is not a verification."""
+        self._build_repo()
+        proc = self._run_cli()
+        self.assertIn(proc.returncode, (0, 1))
+
+        from el_verificador.audit import verify_ledger
+
+        report = verify_ledger(str(self.ledger))
+        self.assertTrue(report.ok, report.errors)
+        self.assertGreaterEqual(report.checked, 1, "no audit record was written")
+
+    def test_two_verifications_produce_a_linked_chain(self):
+        self._build_repo()
+        self._run_cli()
+        self._run_cli()
+
+        from el_verificador.audit import verify_ledger
+
+        report = verify_ledger(str(self.ledger))
+        self.assertTrue(report.ok, report.errors)
+        self.assertGreaterEqual(report.checked, 2)
+
+    # ------------------------------------------------------------------ #
+    # The correction prompt
+    # ------------------------------------------------------------------ #
+    def test_the_correction_prompt_is_bounded_and_actionable(self):
+        """A prompt that grows without bound is a denial-of-service on the agent."""
+        self._build_repo(broken=True)
+        proc = self._run_cli()
+
+        start = proc.stdout.find("=== CORRECTION PROMPT")
+        end = proc.stdout.find("=== END CORRECTION PROMPT")
+        self.assertNotEqual(start, -1, "no correction prompt was emitted")
+        self.assertNotEqual(end, -1)
+
+        prompt = proc.stdout[start:end]
+        self.assertLess(len(prompt), 64_000, "the correction prompt is unbounded")
+        self.assertIn("register_user", prompt)
+        self.assertIn("Failed Checks", prompt)
 
 
 if __name__ == "__main__":
