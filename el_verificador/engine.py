@@ -194,7 +194,10 @@ class ElVerificador:
         semantic_diff = diff_engine.compute(intent)
 
         # Stage 3: Resolve the intent into obligations and decide on them.
-        evaluator = ObligationEvaluator(scope_mode=self.config.scope_mode)
+        evaluator = ObligationEvaluator(
+            scope_mode=self.config.scope_mode,
+            goal_terms_enforced=self.config.goal_terms_enforced,
+        )
         obligations = evaluator.evaluate(
             intent,
             semantic_diff,

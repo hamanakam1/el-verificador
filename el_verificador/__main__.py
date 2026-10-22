@@ -12,6 +12,7 @@ from typing import Any, Coroutine, Dict, Optional
 import yaml
 
 from .engine import ElVerificador
+from .metrics import collect
 from .receipt import ReceiptChain
 from .schemas import (
     CorrectionPrompt,
@@ -77,6 +78,13 @@ def create_parser() -> argparse.ArgumentParser:
         "--receipts", action="store_true", help="List the durable receipt chain"
     )
 
+    metrics_parser = subparsers.add_parser(
+        "metrics", help="Report how the gate is behaving"
+    )
+    metrics_parser.add_argument(
+        "--json", action="store_true", help="Print the report as JSON"
+    )
+
     config_parser = subparsers.add_parser(
         "config", help="Manage configuration"
     )
@@ -126,6 +134,8 @@ def main() -> int:
             return run_sync(cmd_verify(args))
         if args.command == "audit":
             return run_sync(cmd_audit(args))
+        if args.command == "metrics":
+            return run_sync(cmd_metrics(args))
         if args.command == "config":
             return run_sync(cmd_config(args))
         parser.print_help()
@@ -269,6 +279,39 @@ async def cmd_audit(args: argparse.Namespace) -> int:
         print(
             "Provide --work-package to query, --verify-chain to check integrity, "
             "or --receipts to list the durable receipt chain"
+        )
+    return 0
+
+
+async def cmd_metrics(args: argparse.Namespace) -> int:
+    """Report the gate's behaviour, derived from the receipt chain."""
+    config = load_config()
+    report = collect(config).as_dict()
+
+    if getattr(args, "json", False):
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return 0
+
+    outcomes = report.get("outcomes", {})
+    print("Verification metrics")
+    print(f"  verifications      {report['total_verifications']}")
+    print(f"  work packages      {report['work_packages']}")
+    print(f"  pass rate          {report['pass_rate']:.1%}")
+    print(f"  escalation rate    {report['escalation_rate']:.1%}")
+    print(f"  inconclusive rate  {report['inconclusive_rate']:.1%}")
+    print(f"  flags delivered    {report['flags_delivered']}")
+    print("  outcomes           " + ", ".join(
+        f"{name}={count}" for name, count in sorted(outcomes.items())
+    ))
+    blocking = report.get("blocking_obligations", {})
+    if blocking:
+        print("  blocking obligations")
+        for kind, count in sorted(blocking.items(), key=lambda kv: -kv[1]):
+            print(f"    {kind:24} {count}")
+    if report.get("first_verification_at"):
+        print(
+            f"  window             {report['first_verification_at']} "
+            f"-> {report['last_verification_at']}"
         )
     return 0
 

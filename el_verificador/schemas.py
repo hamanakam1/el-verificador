@@ -775,6 +775,11 @@ class VerificationConfig(BaseModel):
     # "off" | "warn" | "enforce" — how a change outside the work package's
     # related_files is treated.
     scope_mode: str = "warn"
+    # Whether a change that shares no vocabulary with the distilled goal
+    # blocks a pass. The check is lexical, so a goal written in abstractions
+    # ("refactor the boundaries for clarity") can fail a correct change.
+    # Turn it off without a code change if that starts happening.
+    goal_terms_enforced: bool = True
 
     # Git
     commit_branch: str = "main"

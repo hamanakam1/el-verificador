@@ -183,11 +183,12 @@ def _symbol_names(diff: SemanticDiff) -> Set[str]:
 class ObligationEvaluator:
     """Builds and resolves the obligation set for one verification attempt."""
 
-    def __init__(self, scope_mode: str = "warn"):
+    def __init__(self, scope_mode: str = "warn", goal_terms_enforced: bool = True):
         # "off" | "warn" | "enforce"
         if scope_mode not in ("off", "warn", "enforce"):
             raise ValueError(f"scope_mode must be off, warn or enforce; got {scope_mode!r}")
         self.scope_mode = scope_mode
+        self.goal_terms_enforced = goal_terms_enforced
 
     # ------------------------------------------------------------------ #
     def evaluate(
@@ -436,6 +437,19 @@ class ObligationEvaluator:
                 )
             ]
         if len(unmatched) == len(unique):
+            if not self.goal_terms_enforced:
+                return [
+                    Obligation(
+                        id="goal_terms_present",
+                        kind=ObligationKind.GOAL_TERMS_PRESENT,
+                        statement="The change addresses the terms of the distilled goal",
+                        status=ObligationStatus.SATISFIED,
+                        detail=(
+                            "WARNING: no term of the goal appears in the change; "
+                            f"goal term(s): {', '.join(unique)}"
+                        ),
+                    )
+                ]
             return [
                 Obligation(
                     id="goal_terms_present",

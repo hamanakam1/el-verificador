@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **An MCP surface.** `el-verificador/mcp` serves `verify_work_package`,
+  `verification_status`, `verification_evidence` and `verify_receipt_chain`
+  over stdio. The point is that agents stop reimplementing checks: Taskrivet
+  wrote the code, and the tool that judges it runs in another process with
+  another context. The `mcp` package is an optional dependency.
+- **A content-addressed evidence store.** Evidence is written under the hash
+  of its own bytes, so identical evidence lands in the same place rather than
+  accumulating copies, nothing is ever overwritten, and every artifact can be
+  re-hashed to prove it is what the decision was made from.
+- **An EdgeRecord receipt chain.** The durable record is now a file-based,
+  chained, canonical-hashed receipt rather than an invented SQLite table. The
+  receipts conform to `factory-contracts/schemas/receipt.v1.json` and to the
+  EdgeRecord receipt shape, and the canonical bytes are byte-for-byte
+  identical to EdgeRecord's own `bin/era-fingerprint.py` — including the
+  non-ASCII case that broke ERA-000314.
+- **A verification sandbox image.** `docker/verification/Dockerfile` builds
+  the image the acceptance checks run inside, with the toolchain baked in so
+  the runtime container needs no network, a non-root uid, and memory, CPU and
+  PID caps. A CI job builds it and runs the acceptance checks inside it.
+- **The acceptance contract comes from the work package.** An explicit command
+  list, or commands parsed out of the acceptance criteria, with the configured
+  default as the fallback. The resolution records which source it used.
+- **Ticket Board flagging on escalation.** The write is additive — existing
+  tags and notes survive, the status is never changed — and it is never
+  attributed to the operator. It is off by default.
+- **A no-progress guard.** If the working tree did not change after a
+  correction, another attempt cannot produce a different result, so the loop
+  escalates instead of spending the remaining budget.
+- **Weakened-test detection.** A deleted, skipped or de-asserted test is a
+  violation. Adding `@pytest.mark.skip` to a test used to go unnoticed,
+  because a symbol's source did not include its decorators.
+- **`el-verificador metrics`.** Pass rate, escalation rate, inconclusive rate
+  and the blocking obligations behind them, derived from the receipt chain.
+- **A golden fixture suite** (`tests/fixtures/golden/`). Eight synthetic
+  repositories with known verdicts, built into real git repositories and
+  verified end to end. The diff engine had no test file at all, and the engine
+  test replaced it with a mock.
+- **Test modules for the diff engine, the obligations, the evidence store, the
+  receipts, the git commit path, the ticket board, the acceptance contract and
+  the MCP surface** — areas that had none.
+- **CI gates for `ruff` and `mypy --strict`**, and dedicated jobs for the
+  golden fixture suite and the sandbox smoke test.
+
 - **Obligation-based intent alignment.** `el_verificador/obligations.py`
   resolves the distilled intent into checkable obligations — `change_present`,
   `acceptance_command`, `no_stub`, `tests_intact`, `scope_respected`,
@@ -41,6 +84,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **The receipt chain is ordered by a monotonic sequence, not by a
+  timestamp.** `created_at` has second resolution, and a verifier that writes
+  several receipts in the same second was being ordered by a random receipt
+  id — which looks exactly like a broken chain.
+- **The test suite no longer writes into the operator's real store.** Every
+  test that builds a config points its evidence store and receipt chain at a
+  temporary directory, so a test run leaves `~/.el-verificador/` exactly as
+  it found it.
+- **The goal-term matcher handles plurals**, and matches only the code the
+  change produced rather than the code it replaced, so a correct
+  implementation is not failed for sharing no vocabulary with its goal.
+  `goal_terms_enforced: false` turns the check off without a code change.
 - **The verdict is now a decision, not a score.** The old "intent coverage"
   number measured how many `related_files` were touched — it was identical
   (0.1) for a correct implementation and for a stub — and the configured 0.85
@@ -94,6 +149,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `model_post_init`, so the `~` in `edgerecord_db` was never expanded.
 - **`datetime.utcnow()`** is deprecated and returned a naive datetime. The
   codebase now uses timezone-aware UTC throughout.
+- **The escalation path carried no evidence.** The failing checks, the diff,
+  the violated obligations and the evidence hashes now travel with the
+  escalation instead of being dropped at the moment they became most
+  valuable.
+- **An inconclusive run was retried.** When the checks never executed there
+  is nothing for the agent to fix, so the loop now stops and reports.
 - **An inconclusive run was retried.** When the checks never executed there
   is nothing for the agent to fix, so the loop now stops and reports.
 - **A missing sandbox image surfaced as a raw Docker 404.** `start()` called
