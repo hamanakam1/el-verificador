@@ -60,12 +60,24 @@ class RetryExhausted(Exception):
     """Raised when max_retries is reached without a passing verification."""
 
 
+class NoProgress(RetryExhausted):
+    """Raised when the repository did not change between two attempts.
+
+    The correction prompt was handed back and nothing was done about it.
+    Re-running the same checks on the same tree produces the same failure,
+    so the loop stops early and says why. Burning the rest of the retry
+    budget on an unchanged repository buys nothing.
+    """
+
+
 class CorrectionLoop:
     """
     Guardrailed retry loop between El Verificador and Taskrivet.
 
     - On failure: compose a Correction Prompt (via local Qwen), hand to Taskrivet
     - Retries are bounded by max_retries; on exhaustion, escalate.
+    - The loop stops early if the repository has not changed since the last
+      attempt, because another identical run would fail identically.
     """
 
     def __init__(
@@ -73,10 +85,12 @@ class CorrectionLoop:
         config: VerificationConfig,
         ollama: OllamaClient,
         run_verification: Callable[[int], VerificationResult],
+        progress_probe: Optional[Callable[[], str]] = None,
     ):
         self.config = config
         self.ollama = ollama
         self._run_verification = run_verification
+        self._progress_probe = progress_probe
         self.attempts: List[VerificationAttempt] = []
 
     async def run_until_pass_or_exhausted(
@@ -93,7 +107,18 @@ class CorrectionLoop:
         have Taskrivet re-execute its work inside the sandbox before the
         next verification attempt.
         """
+        last_signature: Optional[str] = None
         for attempt in range(1, self.config.max_retries + 1):
+            signature = self._progress_signature()
+            if attempt > 1 and signature is not None and signature == last_signature:
+                raise NoProgress(
+                    "the repository did not change between attempt "
+                    f"{attempt - 1} and attempt {attempt}; the correction "
+                    "prompt was not acted on, so another identical run would "
+                    "fail identically"
+                )
+            last_signature = signature
+
             start = time.time()
             result = self._run_verification(attempt)
             duration_ms = int((time.time() - start) * 1000)
@@ -189,6 +214,20 @@ class CorrectionLoop:
         )
 
         return correction
+
+    def _progress_signature(self) -> Optional[str]:
+        """A fingerprint of the repository's current state.
+
+        None when no probe is configured, which disables the check rather
+        than guessing.
+        """
+        if self._progress_probe is None:
+            return None
+        try:
+            return self._progress_probe()
+        except Exception:
+            # A probe that cannot answer is not evidence of no progress.
+            return None
 
     @staticmethod
     def _format_checks(checks: List[CheckResult]) -> str:

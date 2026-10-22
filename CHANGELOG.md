@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The retry loop spent its whole budget on an unchanged repository.** After
+  a failed attempt the loop handed the Correction Prompt back and re-ran the
+  same checks, with nothing checking whether the agent had acted on it. An
+  agent that ignored the prompt burned three attempts to learn nothing. The
+  repository is now fingerprinted before each attempt — head commit, changed
+  paths, and how much each changed — and the loop escalates immediately with
+  the reason when two consecutive attempts see the same fingerprint.
+  `VerificationResult.escalation_reason` carries the reason.
 - **The audit hash did not cover the evidence it claimed to protect.** The
   content hash covered the work package, the decision, the rationale, two
   booleans, and the timestamp — not the key evidence, the attempt count, the
