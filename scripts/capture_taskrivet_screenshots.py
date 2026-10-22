@@ -14,17 +14,15 @@ a local Taskrivet checkout (default ~/Projects/taskrivet).
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
-from pathlib import Path
-import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
+from pathlib import Path
 
 # Synthetic ledger content. Every string here is invented for the fixture.
 TASKS = [
