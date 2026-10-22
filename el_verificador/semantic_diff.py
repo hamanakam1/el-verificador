@@ -663,6 +663,9 @@ def _stem(word: str) -> str:
 
     Not linguistics: just enough that "results", "return" and "returning"
     compare as the same idea, so a goal sentence can be matched against code.
+    The plural rule matters more than it looks — "route" and "routes" have to
+    land on the same stem, or a goal that mentions a file path and a goal
+    that mentions the function in it score as two different claims.
     """
     for suffix, replacement in (
         ("ingly", ""),
@@ -670,12 +673,15 @@ def _stem(word: str) -> str:
         ("edly", ""),
         ("ed", ""),
         ("ies", "y"),
-        ("sses", "ss"),
-        ("es", ""),
-        ("s", ""),
     ):
         if word.endswith(suffix) and len(word) - len(suffix) >= 3:
             return word[: -len(suffix)] + replacement
+    if word.endswith(("sses", "xes", "zes", "ches", "shes")) and len(word) >= 5:
+        return word[:-2]
+    if word.endswith("es") and len(word) >= 5:
+        return word[:-1]
+    if word.endswith("s") and not word.endswith("ss") and len(word) >= 4:
+        return word[:-1]
     return word
 
 

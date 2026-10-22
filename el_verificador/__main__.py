@@ -10,8 +10,11 @@ from pathlib import Path
 
 import yaml
 
-from .engine import ElVerificador
+from .engine import ElVerificador, VerifierDependencies
 from .taskrivet_adapter import adapter_from_args, add_taskrivet_arguments
+from .docker_runner import DockerRunner
+from .git_ops import GitOps
+from .ollama_client import OllamaClient
 from .schemas import EdgeRecordLogger, VerificationConfig
 
 
@@ -91,7 +94,7 @@ async def main() -> int:
         if args.command == "verify":
             return await cmd_verify(args, config)
         if args.command == "audit":
-            return await cmd_audit(args)
+            return await cmd_audit(args, config)
         if args.command == "config":
             return await cmd_config(args)
         print(f"Unknown command: {args.command}", file=sys.stderr)
@@ -103,11 +106,39 @@ async def main() -> int:
         return 1
 
 
+def _ledger_path(config: VerificationConfig) -> str:
+    """Where the audit ledger lives.
+
+    The environment variable overrides the configuration, and both the
+    `verify` and the `audit` command resolve it the same way — a writer and
+    a reader that disagree about the path find nothing.
+    """
+    override = os.environ.get("EL_VERIFICADOR_DB")
+    if override:
+        return override
+    return os.path.expanduser(config.edgerecord_db)
+
+
 async def cmd_verify(args: argparse.Namespace, config: VerificationConfig) -> int:
     with open(args.work_package) as f:
         work_package = json.load(f)
 
-    verifier = ElVerificador(config)
+    # The audit record is the only thing that outlives a verification run,
+    # so it has to be written. Without this the ledger stays empty and
+    # `audit --verify-chain` has nothing to check.
+    logger = EdgeRecordLogger(_ledger_path(config))
+    deps = VerifierDependencies(
+        docker=DockerRunner(config),
+        git=GitOps(args.repo),
+        ollama=OllamaClient(
+            config.ollama_base_url,
+            config.model,
+            config.model_temperature,
+            config.model_timeout,
+        ),
+        audit_logger=logger,
+    )
+    verifier = ElVerificador(config, deps=deps)
 
     adapter = adapter_from_args(args)
     if adapter is not None:
@@ -160,11 +191,11 @@ async def cmd_verify(args: argparse.Namespace, config: VerificationConfig) -> in
     return 0 if result.passed else 1
 
 
-async def cmd_audit(args: argparse.Namespace) -> int:
-    db_path = os.environ.get(
-        "EL_VERIFICADOR_DB", str(Path.home() / ".edgerecord" / "ledger.sqlite")
-    )
-    logger = EdgeRecordLogger(db_path)
+async def cmd_audit(args: argparse.Namespace, config: VerificationConfig) -> int:
+    # Read the ledger the verifier wrote to. The environment variable is the
+    # override, and the configuration is the authority — the same resolution
+    # the `verify` command uses, so the two always agree.
+    logger = EdgeRecordLogger(_ledger_path(config))
     if args.verify_chain:
         ok, reason = logger.chain_status()
         if ok:

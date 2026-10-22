@@ -19,6 +19,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The audit trail was never written.** `VerifierDependencies.audit_logger`
+  had no type annotation, so it was not a dataclass field, so it could not
+  be injected, so `self.deps.audit_logger` was always `None`, so the engine
+  never wrote a record. Every verification ran, decided, and recorded
+  nothing — and the `audit` command read a table that did not exist. The
+  field is annotated, the CLI injects the logger, and the record is written.
+- **The default ledger path was another component's file.** The verifier's
+  audit table was being written into the real EdgeRecord's store at
+  `~/.edgerecord/ledger.sqlite`. The default is now the verifier's own
+  `~/.el-verificador/ledger.sqlite`, and `EL_VERIFICADOR_DB` overrides it for
+  both the `verify` and the `audit` command, so a writer and a reader can
+  never disagree about where the record is.
+- **The commit path could move another session's work.** `commit()` ran
+  `git checkout` to reach the branch it was asked to commit to, which on a
+  shared working tree moves every other session's files and branch under
+  their feet. The branch is now only changed when the working tree has no
+  tracked changes that this verification did not review.
+- **"route" and "routes" were two different claims.** The stemmer reduced
+  "routes" to "rout" and left "route" alone, so a goal that mentioned a
+  file path and a goal that mentioned the function in it scored as two
+  claims and one of them could never be covered.
+
 - **Acceptance checks fell back to running on the host.** When Docker was
   unavailable or `dry_run` was set, the checks ran with `subprocess.run` in
   the repository under test — code the agent wrote, with the operator's

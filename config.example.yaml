@@ -8,7 +8,10 @@ model_temperature: 0.1
 model_timeout: 60
 
 # EdgeRecord
-edgerecord_db: "~/.edgerecord/ledger.sqlite"
+# The verifier's own audit ledger. It is not the real EdgeRecord's store:
+# that one is file-based and owned by another component. EL_VERIFICADOR_DB
+# overrides this, and both `verify` and `audit` resolve it the same way.
+edgerecord_db: "~/.el-verificador/ledger.sqlite"
 
 # Docker sandbox
 docker_image: "taskrivet/sandbox:latest"

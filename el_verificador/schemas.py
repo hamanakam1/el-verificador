@@ -630,7 +630,7 @@ class VerificationConfig(BaseModel):
     model_timeout: int = 60
 
     # EdgeRecord
-    edgerecord_db: str = "~/.edgerecord/ledger.sqlite"
+    edgerecord_db: str = "~/.el-verificador/ledger.sqlite"
 
     # Docker sandbox
     docker_image: str = "taskrivet/sandbox:latest"

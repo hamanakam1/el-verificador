@@ -1378,10 +1378,82 @@ The adapter already tried to read `intent.acceptance_criteria` and
 the contract yet. With the contract now carrying them, the adapter joins the
 criteria list rather than passing the list through as a string.
 
+**Still open, unchanged:** structured test results, per-check isolation,
+resource caps, and the evidence store (Phase 1); the obligation model that
+replaces the coverage score (Phase 2); and the audit trail not being written
+to the real EdgeRecord (§2.2) — though it no longer writes into that
+component's store by accident (Appendix J).
+
+---
+
+## Appendix J — The audit trail was never written
+
+**J.1 — The audit logger could not be injected (`engine.py`)**
+
+`VerifierDependencies.audit_logger` was written as a bare class attribute
+with no type annotation:
+
+```python
+audit_logger = None  # EdgeRecordLogger | None
+```
+
+A dataclass field needs an annotation, so this was not a field. It could not
+be passed to the constructor, and `self.deps.audit_logger` was always
+`None`. The engine's write was guarded by
+`if not self.config.dry_run and self.deps.audit_logger is not None:`, so
+**the audit record was never written**. Every verification ran, decided, and
+recorded nothing.
+
+The evidence was in plain sight: the ledger the `audit` command reads had
+no `verification_audits` table in it, and the only table present was
+`distillation_audits` — written by a different component.
+
+*Fix:* the field is annotated, so it is a field, so it can be injected, so
+the record is written. The CLI builds the logger from the configuration and
+injects it.
+
+**J.2 — The default ledger path was another component's file
+(`schemas.py`, `__main__.py`)**
+
+`edgerecord_db` defaulted to `~/.edgerecord/ledger.sqlite`, which is the
+real EdgeRecord's store. The verifier was writing a table of its own into
+another component's file — the file the ROADMAP already flags as *not* the
+system of record.
+
+*Fix:* the default is `~/.el-verificador/ledger.sqlite`, the verifier's own
+directory, next to the receipts and evidence it already writes there.
+`EL_VERIFICADOR_DB` overrides it, and **both** the `verify` and the `audit`
+command resolve the path the same way. A writer and a reader that disagree
+about the path find nothing.
+
+**J.3 — The commit path could move another session's work (`git_ops.py`)**
+
+`commit()` ran `git checkout <target>` to reach the branch it was asked to
+commit to. On a shared working tree that moves every other session's files
+and branch under their feet, and a checkout that fails was reported as a
+commit failure rather than as what it was.
+
+*Fix:* the branch is only changed when the working tree has no tracked
+changes that this verification did not review. The reviewed paths are the
+verified work and they are meant to travel with the switch; anything else in
+the tree is another session's, and it is refused rather than carried.
+Untracked files do not block a switch, because they survive one untouched.
+
+**J.4 — "route" and "routes" were two different claims (`semantic_diff.py`)**
+
+The stemmer reduced "routes" to "rout" and left "route" alone, so a goal
+that mentioned a file path and a goal that mentioned the function in it
+scored as two separate claims, and the second one could never be covered.
+
+*Fix:* the plural rule now keeps the stem consistent — "route" and "routes"
+are the same word, as are "match"/"matches" and "class"/"classes".
+
 **Still open, unchanged:** the missing sandbox image (§2.3.2), structured
 test results, per-check isolation, resource caps, and the evidence store
 (Phase 1); the obligation model that replaces the coverage score (Phase 2);
-and the audit trail not being written to the real EdgeRecord (§2.2).
+and the audit trail not being written to the real EdgeRecord (§2.2) — the
+verifier now keeps its own ledger, but that ledger is not yet the system of
+record.
 
 ---
 

@@ -108,6 +108,27 @@ class GitOps:
         ).hexdigest()
         return digest
 
+    def tracked_changes(self) -> list[str]:
+        """Paths with tracked modifications. Untracked files are not included.
+
+        Untracked files survive a checkout untouched, so they do not make a
+        branch switch unsafe. A modified tracked file does: switching would
+        carry it, or fail, under another session's feet.
+        """
+        return self._changed_paths(["--untracked-files=no"])
+
+    def _changed_paths(self, extra: list[str]) -> list[str]:
+        output = self._run(["status", "--porcelain", *extra]).stdout
+        paths: list[str] = []
+        for line in output.splitlines():
+            if len(line) < 4:
+                continue
+            path = line[3:].strip()
+            if " -> " in path:  # a rename
+                path = path.split(" -> ", 1)[1].strip()
+            paths.append(path.strip('"'))
+        return paths
+
     def commit(
         self,
         message: str,
@@ -162,11 +183,28 @@ class GitOps:
                     "verified commit"
                 )
 
-        checkout = self._run(["checkout", target])
-        if checkout.returncode != 0:
-            raise CommitRefused(
-                f"could not check out {target}: {checkout.stderr.strip()}"
-            )
+        # Switching branches under another session is not safe. The branch is
+        # only changed when the working tree has nothing tracked in flight
+        # that is not ours to move — the reviewed paths are the verified
+        # work, and they are meant to travel with the switch. Anything else
+        # in the tree is another session's, and it is refused rather than
+        # carried.
+        current = self.current_state().branch
+        if target != current:
+            in_flight = [p for p in self.tracked_changes() if p not in set(paths)]
+            if in_flight:
+                raise CommitRefused(
+                    f"the working tree has tracked changes this verification "
+                    f"did not review ({', '.join(in_flight[:10])}), so it "
+                    f"cannot be moved to {target} without disturbing them; "
+                    f"commit to the current branch ({current}) or clean the "
+                    f"tree first"
+                )
+            checkout = self._run(["checkout", target])
+            if checkout.returncode != 0:
+                raise CommitRefused(
+                    f"could not check out {target}: {checkout.stderr.strip()}"
+                )
 
         self._run(["add", "--", *paths])
 

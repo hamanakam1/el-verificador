@@ -24,6 +24,7 @@ from .git_ops import GitOps
 from .ollama_client import OllamaClient
 from .schemas import (
     CorrectionPrompt,
+    EdgeRecordLogger,
     IntentPackage,
     SemanticDiff,
     VerificationAudit,
@@ -41,7 +42,7 @@ class VerifierDependencies:
     docker: DockerRunner
     git: GitOps
     ollama: OllamaClient
-    audit_logger = None  # EdgeRecordLogger | None
+    audit_logger: Optional[EdgeRecordLogger] = None
 
 
 class ElVerificador:
