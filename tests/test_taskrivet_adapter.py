@@ -140,6 +140,20 @@ class TestTaskrivetAdapterCalls(unittest.TestCase):
         verbs = [c[0] for c in self.adapter.calls]
         self.assertEqual(verbs, ["checkpoint", "finish", "accept"])
 
+    def test_apply_escalation_records_failure_without_retrying(self):
+        """Escalation must block the task, not requeue it."""
+        self.adapter.session_id = "session-9"
+        self.adapter.apply_escalation("Verification exhausted after 3 attempts")
+        verbs = [c[0] for c in self.adapter.calls]
+        self.assertEqual(verbs, ["fail"])
+        fail_call = self.adapter.calls[0]
+        self.assertEqual(
+            fail_call[fail_call.index("--category") + 1], "verification_escalated"
+        )
+        self.assertLessEqual(
+            len(fail_call[fail_call.index("--summary") + 1]), 400
+        )
+
     def test_describe_failure_includes_obligations(self):
         prompt = CorrectionPrompt(
             attempt=1,

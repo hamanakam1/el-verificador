@@ -345,6 +345,20 @@ class TaskrivetAdapter:
         self.record_finish(evidence=evidence)
         self.accept(reason="El Verificador: acceptance checks and intent alignment passed")
 
+    def apply_escalation(self, summary: str) -> None:
+        """
+        Flag the task for human intervention.
+
+        The retry budget is exhausted. The last failure is recorded against
+        the active session so Taskrivet blocks the task and shows the
+        evidence, instead of leaving an abandoned session and a task that
+        looks like it is still running.
+        """
+        self.record_failure(
+            category="verification_escalated",
+            summary=summary[:MAX_SUMMARY_CHARS],
+        )
+
     def retry_callback(self) -> Callable[[CorrectionPrompt], None]:
         """
         Build the `taskrivet_retry` callback expected by `ElVerificador.verify`.

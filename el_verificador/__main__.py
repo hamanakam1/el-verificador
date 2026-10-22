@@ -123,13 +123,26 @@ async def cmd_verify(args: argparse.Namespace, config: VerificationConfig) -> in
         taskrivet_retry=taskrivet_retry,
     )
 
-    if adapter is not None and result.passed:
-        adapter.apply_pass(
-            evidence=(
-                "Verification passed for "
-                f"{work_package.get('id', 'work package')}"
+    if adapter is not None:
+        decision = getattr(result.decision, "value", result.decision)
+        if result.passed:
+            adapter.apply_pass(
+                evidence=(
+                    "Verification passed for "
+                    f"{work_package.get('id', 'work package')}"
+                )
             )
-        )
+        elif decision == "escalate":
+            # The retry budget is exhausted. Record the final failure so
+            # Taskrivet blocks the task for human intervention instead of
+            # leaving an abandoned session behind.
+            adapter.apply_escalation(
+                summary=(
+                    f"Verification exhausted after "
+                    f"{len(getattr(result, 'attempts', []) or [])} attempts; "
+                    "escalating to human"
+                )
+            )
 
     print(json.dumps(result.model_dump(mode="json"), indent=2))
     return 0 if result.passed else 1
