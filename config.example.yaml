@@ -1,0 +1,38 @@
+# El Verificador Configuration
+# Copy to ~/.el-verificador/config.yaml and customize
+
+# Ollama / Local LLM (used to build Correction Prompts)
+ollama_base_url: "http://127.0.0.1:11434"
+model: "qwen2.5:14b"
+model_temperature: 0.1
+model_timeout: 60
+
+# EdgeRecord
+edgerecord_db: "~/.edgerecord/ledger.sqlite"
+
+# Docker sandbox
+docker_image: "taskrivet/sandbox:latest"
+docker_workdir: "/workspace"
+docker_timeout: 300
+docker_remove_on_teardown: true
+
+# Acceptance test commands (run inside the container, in order)
+test_commands:
+  - "pytest -q"
+  - "ruff check ."
+  - "bandit -r . -q"
+
+# Guardrails
+max_retries: 3
+max_retry_duration_ms: 600000
+
+# Semantic diff / intent alignment
+intent_coverage_threshold: 0.85
+fail_on_todo_stubs: true
+
+# Git
+commit_branch: "main"
+commit_message_prefix: "feat(el-verificador):"
+
+# Dry-run: skip Docker/git/EdgeRecord writes for offline testing
+dry_run: false

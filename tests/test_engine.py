@@ -1,0 +1,136 @@
+"""End-to-end tests for the El Verificador engine (dry-run mode)."""
+import asyncio
+import unittest
+from unittest.mock import MagicMock, patch
+
+from el_verificador.engine import ElVerificador, VerifierDependencies
+from el_verificador.schemas import (
+    CheckKind,
+    CheckResult,
+    IntentPackage,
+    SemanticDiff,
+    VerificationConfig,
+    VerificationDecision,
+    VerificationResult,
+)
+
+
+class _FakeDocker:
+    """Fake sandbox runner that returns results supplied by the test."""
+
+    def __init__(self, results):
+        self.results = results
+        self.started = False
+        self.teardown_called = False
+
+    def start(self, repo_path):
+        self.started = True
+        return MagicMock(container_id="fake", image="img", workdir=repo_path)
+
+    def teardown(self):
+        self.teardown_called = True
+
+    def run_all(self):
+        return list(self.results)
+
+    def run_check(self, kind, command):
+        return self.results[0]
+
+
+class TestEngineDryRun(unittest.TestCase):
+    def setUp(self):
+        self.config = VerificationConfig(dry_run=True)
+        self.work_package = {
+            "id": "dwp-abc",
+            "true_goal": "Implement the login API route",
+            "true_goal_summary": "login route",
+            "related_files": ["app/auth.py"],
+        }
+        self.pass_check = CheckResult(
+            kind=CheckKind.UNIT_TESTS, command="pytest -q", exit_code=0
+        )
+        self.aligned_diff = SemanticDiff(
+            repo_path="/tmp/repo",
+            base_commit="a" * 40,
+            head_commit="b" * 40,
+            files_changed=["app/auth.py"],
+            added_lines=10,
+            removed_lines=0,
+            ast_changes=[],
+            intent_coverage=0.95,
+            has_todo_stubs=False,
+            stub_symbols=[],
+        )
+
+    def _make_verifier(self, check_results, aligned=True):
+        docker = _FakeDocker(check_results)
+        deps = VerifierDependencies(docker=docker, git=MagicMock(), ollama=MagicMock())
+        verifier = ElVerificador(self.config, deps=deps)
+        return verifier, docker
+
+    def _run_verify(self, verifier, work_package, repo, base, head):
+        return asyncio.run(
+            verifier.verify(work_package, repo, base, head)
+        )
+
+    def test_pass_single_attempt(self):
+        verifier, docker = self._make_verifier([self.pass_check])
+        with patch(
+            "el_verificador.engine.SemanticDiffEngine"
+        ) as mock_engine:
+            instance = mock_engine.return_value
+            instance.compute.return_value = self.aligned_diff
+            result = self._run_verify(
+                verifier, self.work_package, "/tmp/repo", "a" * 40, "b" * 40
+            )
+        self.assertTrue(docker.started)
+        self.assertTrue(docker.teardown_called)
+        self.assertEqual(result.decision, VerificationDecision.PASS)
+        self.assertTrue(result.passed)
+        # dry_run skips actual commits
+        self.assertFalse(result.committed)
+
+    def test_fail_when_checks_fail(self):
+        fail_check = CheckResult(
+            kind=CheckKind.UNIT_TESTS, command="pytest -q", exit_code=1
+        )
+        verifier, docker = self._make_verifier([fail_check])
+        with patch(
+            "el_verificador.engine.SemanticDiffEngine"
+        ) as mock_engine:
+            instance = mock_engine.return_value
+            instance.compute.return_value = self.aligned_diff
+            result = self._run_verify(
+                verifier, self.work_package, "/tmp/repo", "a" * 40, "b" * 40
+            )
+        self.assertEqual(result.decision, VerificationDecision.FAIL)
+        self.assertFalse(result.passed)
+
+    def test_fail_when_diff_not_aligned(self):
+        bad_diff = SemanticDiff(
+            repo_path="/tmp/repo",
+            base_commit="a" * 40,
+            head_commit="b" * 40,
+            files_changed=[],
+            added_lines=0,
+            removed_lines=0,
+            ast_changes=[],
+            intent_coverage=0.0,
+            has_todo_stubs=True,
+            stub_symbols=["login"],
+        )
+        verifier, docker = self._make_verifier([self.pass_check])
+        with patch(
+            "el_verificador.engine.SemanticDiffEngine"
+        ) as mock_engine:
+            instance = mock_engine.return_value
+            instance.compute.return_value = bad_diff
+            result = self._run_verify(
+                verifier, self.work_package, "/tmp/repo", "a" * 40, "b" * 40
+            )
+        self.assertEqual(result.decision, VerificationDecision.FAIL)
+        self.assertFalse(result.passed)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -61,4 +61,33 @@ When the code passes both machine tests and the semantic intent check, El Verifi
 
 ## Status
 
-**Early scaffolding** — Design phase. Implementation will be driven by local Qwen/Ollama models following a constraints-driven approach.
+**Implemented** — Python package with data contracts, Docker sandbox runner,
+semantic-diff intent alignment, guardrailed retry loop, git commit + teardown,
+and EdgeRecord audit logging. Run in `dry_run` mode for offline development.
+
+## Quick Start
+
+```bash
+# 1. Create config
+python -m el_verificador config --init
+
+# 2. Verify a DistilledWorkPackage (dry-run: no Docker/git/EdgeRecord writes)
+python -m el_verificador verify \
+  --work-package path/to/work_package.json \
+  --repo /path/to/repo \
+  --base HEAD~1 \
+  --head HEAD \
+  --dry-run
+```
+
+## Verification Cycle
+
+| Stage | What happens |
+|-------|--------------|
+| Acceptance testing | Unit tests, lint, security scans run inside the hydrated Docker sandbox |
+| Intent alignment | AST/git diff compared against the `DistilledWorkPackage` true goal |
+| Correction loop | Failed runs produce a bounded Correction Prompt to Taskrivet (`max_retries=3`) |
+| Exhaustion | Loop breaks; ticket flagged for human intervention with full context |
+| Pass | Code committed, sandbox torn down, audit payload fired to EdgeRecord |
+
+See `AGENTS.md` for contributor conventions.
