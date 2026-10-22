@@ -1,11 +1,15 @@
 # El Verificador
 
 ```text
-EEEEEE L      V   V EEEEE RRRR   IIIII FFFFF IIIII  CCCC   A   DDDD   OOO  RRRR
-E      L      V   V E     R   R    I   F       I   C     A   A D   D O   O R   R
-EEE    L      V   V EEE   RRRR     I   FFF     I   C     AAAAA D   D O   O RRRR
-E      L       V V  E     R  R     I   F       I   C     A   A D   D O   O R  R
-EEEEEE LLLLL    V   EEEEE R   R   IIIII F     IIIII  CCCC A   A DDDD   OOO  R   R
+EEEEE  L        V   V  EEEEE  RRRR   IIIII  FFFFF  IIIII   CCCC   AAA   DDDD    OOO   RRRR
+E      L        V   V  E      R   R    I    F        I    C      A   A  D   D  O   O  R   R
+E      L        V   V  E      RRRR     I    F        I    C      AAAAA  D   D  O   O  RRRR
+EEE    L        V   V  EEE    R  R     I    FFF      I    C      A   A  D   D  O   O  R  R
+E      L         V V   E      R   R    I    F        I    C      A   A  D   D  O   O  R   R
+E      L         V V   E      R   R    I    F        I    C      A   A  D   D  O   O  R   R
+EEEEE  LLLLL      V    EEEEE  R   R  IIIII  F      IIIII   CCCC  A   A  DDDD    OOO   R   R
+
+  >_ Code written is not code committed.
 ```
 
 [![Tests](https://github.com/hamanakam1/el-verificador/actions/workflows/tests.yml/badge.svg)](https://github.com/hamanakam1/el-verificador/actions/workflows/tests.yml)
