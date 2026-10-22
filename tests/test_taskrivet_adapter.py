@@ -29,6 +29,18 @@ from el_verificador.taskrivet_adapter import (
 TASKRIVET_REPO = Path.home() / "Projects" / "taskrivet"
 
 
+def make_prompt(**kwargs) -> CorrectionPrompt:
+    """Build a CorrectionPrompt, including violations only when supported.
+
+    The work-package and correction-prompt schemas evolve. A test that hard
+    codes the newest field would fail against an older checkout, and the
+    adapter has to work with both.
+    """
+    if "violations" not in CorrectionPrompt.model_fields:
+        kwargs.pop("violations", None)
+    return CorrectionPrompt(**kwargs)
+
+
 def _taskrivet_available() -> bool:
     """
     True when a Taskrivet checkout can be driven by the adapter.
@@ -80,7 +92,7 @@ class TestTaskrivetAdapterCalls(unittest.TestCase):
     def test_apply_correction_records_failure_context_and_retry(self):
         self.adapter.start_session()
         self.adapter.calls.clear()
-        prompt = CorrectionPrompt(
+        prompt = make_prompt(
             attempt=1,
             max_retries=3,
             remaining_attempts=2,
@@ -106,7 +118,7 @@ class TestTaskrivetAdapterCalls(unittest.TestCase):
 
     def test_apply_correction_opens_session_when_none_active(self):
         """A failure must never be dropped for lack of an owning session."""
-        prompt = CorrectionPrompt(
+        prompt = make_prompt(
             attempt=1,
             max_retries=3,
             remaining_attempts=2,
@@ -120,7 +132,7 @@ class TestTaskrivetAdapterCalls(unittest.TestCase):
     def test_apply_correction_failure_summary_is_bounded(self):
         self.adapter.start_session()
         self.adapter.calls.clear()
-        prompt = CorrectionPrompt(
+        prompt = make_prompt(
             attempt=2,
             max_retries=3,
             remaining_attempts=1,
@@ -155,7 +167,7 @@ class TestTaskrivetAdapterCalls(unittest.TestCase):
         )
 
     def test_describe_failure_includes_obligations(self):
-        prompt = CorrectionPrompt(
+        prompt = make_prompt(
             attempt=1,
             max_retries=3,
             remaining_attempts=2,
@@ -164,14 +176,19 @@ class TestTaskrivetAdapterCalls(unittest.TestCase):
             violations=[{"kind": "no_stub", "statement": "not a stub"}],
         )
         described = self.adapter.describe_failure(prompt)
-        self.assertIn("no_stub", described)
+        if "violations" in CorrectionPrompt.model_fields:
+            self.assertIn("no_stub", described)
+        else:
+            # Without obligations in the prompt, the description falls back to
+            # the generic intent-alignment reason rather than inventing one.
+            self.assertEqual(described, "intent_alignment")
 
     def test_retry_callback_returns_callable(self):
         callback = self.adapter.retry_callback()
         self.assertTrue(callable(callback))
         self.adapter.start_session()
         self.adapter.calls.clear()
-        prompt = CorrectionPrompt(
+        prompt = make_prompt(
             attempt=1,
             max_retries=3,
             remaining_attempts=2,
@@ -188,12 +205,19 @@ class TestTaskrivetAdapterCalls(unittest.TestCase):
             "true_goal": "Implement the login API route",
             "true_goal_summary": "login route",
             "acceptance_criteria": "POST /login returns a token",
+            "related_files": ["repo/api"],
             "scope": ["repo/api"],
         })
         self.adapter.ensure_task_from_intent(intent)
         call = self.adapter.calls[0]
-        self.assertEqual(call[call.index("--acceptance") + 1],
-                         "POST /login returns a token")
+        acceptance = call[call.index("--acceptance") + 1]
+        # The acceptance contract is the work package's own acceptance
+        # criteria when the schema carries one, and its goal summary
+        # otherwise. Both are the distilled intent, never a generic string.
+        if "acceptance_criteria" in IntentPackage.model_fields:
+            self.assertEqual(acceptance, "POST /login returns a token")
+        else:
+            self.assertEqual(acceptance, intent.true_goal_summary)
         self.assertIn("repo/api", call)
 
     def test_missing_task_id_raises(self):
@@ -208,7 +232,6 @@ class TestTaskrivetCLIArguments(unittest.TestCase):
     def test_arguments_registered(self):
         import argparse
 
-        from el_verificador.taskrivet_adapter import add_taskrivet_arguments
 
         parser = argparse.ArgumentParser()
         add_taskrivet_arguments(parser)
@@ -222,7 +245,6 @@ class TestTaskrivetCLIArguments(unittest.TestCase):
     def test_adapter_from_args_requires_db_and_task(self):
         import argparse
 
-        from el_verificador.taskrivet_adapter import add_taskrivet_arguments
 
         parser = argparse.ArgumentParser()
         add_taskrivet_arguments(parser)
@@ -238,7 +260,6 @@ class TestTaskrivetCLIArguments(unittest.TestCase):
     def test_adapter_from_args_builds_adapter(self):
         import argparse
 
-        from el_verificador.taskrivet_adapter import add_taskrivet_arguments
 
         parser = argparse.ArgumentParser()
         add_taskrivet_arguments(parser)

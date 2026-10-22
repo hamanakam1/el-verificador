@@ -100,7 +100,7 @@ class TaskrivetAdapter:
         if not payload:
             return {}
         try:
-            return json.loads(payload)
+            return dict(json.loads(payload))
         except json.JSONDecodeError as exc:
             raise TaskrivetError(
                 f"taskrivet returned non-JSON output: {payload[:200]}"
@@ -155,8 +155,8 @@ class TaskrivetAdapter:
         session_id = result.get("session_id")
         if not session_id:
             raise TaskrivetError(f"taskrivet start returned no session id: {result}")
-        self.session_id = session_id
-        return session_id
+        self.session_id = str(session_id)
+        return str(session_id)
 
     def record_failure(self, category: str, summary: str) -> None:
         """Record a verification failure against the active session."""
@@ -259,16 +259,25 @@ class TaskrivetAdapter:
         The acceptance criteria carried by the work package become the
         Taskrivet task's acceptance contract, so the two systems agree on
         what "done" means.
+
+        Fields are read defensively: the work-package schema evolves, and a
+        verifier that crashes on an older or newer schema would report a
+        broken gate rather than a broken build.
         """
         if isinstance(intent, dict):
             intent = IntentPackage.from_dict(intent)
+
         acceptance = (
-            intent.acceptance_criteria
-            or "; ".join(intent.acceptance_commands)
+            getattr(intent, "acceptance_criteria", None)
+            or "; ".join(getattr(intent, "acceptance_commands", None) or [])
             or intent.true_goal_summary
             or intent.true_goal
         )
-        scope = intent.scope or intent.related_files or None
+        scope = (
+            getattr(intent, "scope", None)
+            or getattr(intent, "related_files", None)
+            or None
+        )
         return self.ensure_task(
             objective=intent.true_goal,
             acceptance=acceptance,
@@ -276,12 +285,18 @@ class TaskrivetAdapter:
         )
 
     @staticmethod
+    def _violations(prompt: CorrectionPrompt) -> List[Dict[str, Any]]:
+        """Obligation violations, when the prompt schema carries them."""
+        return list(getattr(prompt, "violations", None) or [])
+
+    @staticmethod
     def describe_failure(prompt: CorrectionPrompt) -> str:
         """Build a bounded one-line description of why an attempt failed."""
         parts: List[str] = []
-        if prompt.violations:
+        violations = TaskrivetAdapter._violations(prompt)
+        if violations:
             kinds = ", ".join(
-                str(v.get("kind", "obligation")) for v in prompt.violations[:3]
+                str(v.get("kind", "obligation")) for v in violations[:3]
             )
             parts.append(f"obligations({kinds})")
         if prompt.failed_checks:
@@ -304,10 +319,11 @@ class TaskrivetAdapter:
         """
         rendered = prompt.render()
         reason_parts = [self.describe_failure(prompt)]
-        if prompt.violations:
+        violations = self._violations(prompt)
+        if violations:
             statements = [
                 str(v.get("statement", "")).strip()
-                for v in prompt.violations[:2]
+                for v in violations[:2]
                 if v.get("statement")
             ]
             if statements:
