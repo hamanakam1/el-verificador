@@ -59,7 +59,9 @@ class TestCommitScope(unittest.TestCase):
         # Another session left an unrelated change in the tree.
         self.repo.write("theirs.py", "print('not mine')\n")
 
-        sha = self.git.commit("feat: scoped change", ["owned.py"])
+        sha = self.git.commit(
+            "feat: scoped change", ["owned.py"], verified_state="worktree"
+        )
         self.assertTrue(sha)
 
         committed = self.git.committed_paths(sha)
@@ -69,7 +71,9 @@ class TestCommitScope(unittest.TestCase):
         self.repo.write("owned.py", "print('changed')\n")
         self.repo.write("theirs.py", "print('not mine')\n")
 
-        self.git.commit("feat: scoped change", ["owned.py"])
+        self.git.commit(
+            "feat: scoped change", ["owned.py"], verified_state="worktree"
+        )
 
         # The other session's file must still be uncommitted.
         status = _git(self.repo.repo, "status", "--porcelain")
@@ -92,19 +96,62 @@ class TestCommitScope(unittest.TestCase):
     def test_the_current_branch_is_accepted(self):
         self.repo.write("owned.py", "print('changed')\n")
         sha = self.git.commit(
-            "feat: scoped change", ["owned.py"], branch=self.repo.branch
+            "feat: scoped change",
+            ["owned.py"],
+            branch=self.repo.branch,
+            verified_state="worktree",
         )
         self.assertTrue(sha)
 
     def test_a_new_file_is_committed(self):
         self.repo.write("fresh.py", "print('new')\n")
-        sha = self.git.commit("feat: new file", ["fresh.py"])
+        sha = self.git.commit(
+            "feat: new file", ["fresh.py"], verified_state="worktree"
+        )
         self.assertIn("fresh.py", self.git.committed_paths(sha))
 
     def test_a_deleted_file_is_committed(self):
         (self.repo.repo / "theirs.py").unlink()
-        sha = self.git.commit("feat: remove file", ["theirs.py"])
+        sha = self.git.commit(
+            "feat: remove file", ["theirs.py"], verified_state="worktree"
+        )
         self.assertIn("theirs.py", self.git.committed_paths(sha))
+
+    def test_a_head_verification_refuses_a_moved_on_working_tree(self):
+        """A commit of a range that was not judged must not happen."""
+        self.repo.write("owned.py", "print('changed')\n")
+        _git(self.repo.repo, "add", "-A")
+        _git(self.repo.repo, "commit", "-qm", "head")
+        self.repo.write("owned.py", "print('edited after verification')\n")
+
+        with self.assertRaises(CommitScopeError) as ctx:
+            self.git.commit("feat: scoped change", ["owned.py"])
+        self.assertIn("never verified", str(ctx.exception))
+
+    def test_a_working_tree_that_moved_on_is_refused(self):
+        """What was judged must be what is committed."""
+        self.repo.write("owned.py", "print('changed')\n")
+        _git(self.repo.repo, "add", "-A")
+        _git(self.repo.repo, "commit", "-qm", "head")
+        # The agent keeps editing after the verification.
+        self.repo.write("owned.py", "print('edited after verification')\n")
+
+        with self.assertRaises(CommitScopeError) as ctx:
+            self.git.commit("feat: scoped change", ["owned.py"])
+        self.assertIn("never verified", str(ctx.exception))
+
+    def test_an_unrelated_working_tree_change_does_not_block(self):
+        """Another session's file is not this commit's business."""
+        self.repo.write("owned.py", "print('changed')\n")
+        self.repo.write("theirs.py", "print('not mine')\n")
+
+        sha = self.git.commit(
+            "feat: scoped change", ["owned.py"], verified_state="worktree"
+        )
+        self.assertTrue(sha)
+        # Their file must still be uncommitted.
+        status = _git(self.repo.repo, "status", "--porcelain")
+        self.assertIn("theirs.py", status)
 
     def test_changed_paths_reports_the_diff(self):
         self.repo.write("owned.py", "print('changed')\n")

@@ -42,6 +42,10 @@ Board → El Hidratador → Taskrivet → El Verificador → EdgeRecord pipeline
   a command, it must be inside the container.
 - **Never commit with a blanket add.** The commit is scoped to the verified
   change set. Stage only the paths you own; never `git add -A` or `git add .`.
+- **What was judged must be what is committed.** The diff's upper bound is the
+  working tree by default, and the commit carries that same content. A
+  verification of a commit range does not judge the working tree, so it does
+  not commit one.
 - Every verification decision must cite at least one evidence hash, and the
   audit record's content hash must cover that evidence — not just the prose.
 - Never trust Taskrivet's self-reported status; verify independently.

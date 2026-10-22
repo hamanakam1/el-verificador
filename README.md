@@ -246,13 +246,18 @@ python -m el_verificador verify \
   --work-package path/to/work_package.json \
   --repo /path/to/repo \
   --base HEAD~1 \
-  --head HEAD \
   --dry-run
 
 # 4. Check the record
 python -m el_verificador audit --verify-chain
 python -m el_verificador audit --receipts
 ```
+
+The diff's upper bound is the **working tree** by default: the agent leaves its
+work uncommitted, the verifier judges exactly that, and the commit it makes
+carries exactly what was judged. `--head <commit>` judges a commit range
+instead, and the commit step is then skipped rather than committing content
+nothing verified.
 
 Exit codes: `0` pass, `1` fail or escalate, `2` inconclusive (no verdict was
 reached — nothing ran).

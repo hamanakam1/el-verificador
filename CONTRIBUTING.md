@@ -47,7 +47,7 @@ mypy el_verificador
 python -m el_verificador verify \
   --work-package path/to/work_package.json \
   --repo /path/to/repo \
-  --base HEAD~1 --head HEAD --dry-run
+  --base HEAD~1 --dry-run
 
 # Run the acceptance checks inside a real container
 python scripts/sandbox_smoke_test.py

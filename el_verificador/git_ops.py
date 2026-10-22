@@ -71,17 +71,50 @@ class GitOps:
         result = self._run(["diff", "--name-only", f"{base}...{head}"])
         return [line.strip() for line in str(result.stdout).splitlines() if line.strip()]
 
+    def assert_paths_match_head(self, paths: Sequence[str]) -> None:
+        """Fail when the working tree differs from HEAD for these paths.
+
+        The verifier judges the *committed* tree: the diff runs between two
+        commits. The commit it then makes takes the *working tree* content of
+        the same paths. If the working tree has moved on since the
+        verification — the agent is still editing, or something else touched
+        the file — the commit would carry content that was never verified.
+
+        The commit must contain what was judged, or nothing.
+        """
+        scope = [p for p in dict.fromkeys(paths) if p]
+        if not scope:
+            return
+        result = self._run(["diff", "--name-only", "HEAD", "--", *scope])
+        if result.returncode != 0:
+            raise CommitScopeError(
+                f"could not compare the working tree with HEAD: {result.stderr.strip()}"
+            )
+        changed = [line.strip() for line in str(result.stdout).splitlines() if line.strip()]
+        if changed:
+            raise CommitScopeError(
+                "the working tree changed since the verification, so the "
+                "commit would carry content that was never verified: "
+                + ", ".join(sorted(changed))
+            )
+
     def commit(
         self,
         message: str,
         paths: Sequence[str],
         branch: Optional[str] = None,
+        verified_state: str = "head",
     ) -> str:
         """Commit exactly `paths` and nothing else. Returns the new commit SHA.
 
         The branch is never switched: `git checkout` on a dirty shared working
         tree can move another session's work. When the requested branch is not
         the current one, the commit is refused rather than forced.
+
+        `verified_state` says what the verifier judged: `"head"` (the
+        committed tree) or `"worktree"` (the files on disk). Only the
+        worktree case may commit a working tree that differs from HEAD —
+        that difference is exactly what was verified.
         """
         scope = [p for p in dict.fromkeys(paths) if p]
         if not scope:
@@ -95,6 +128,10 @@ class GitOps:
                 f"refusing to commit on {current!r} when {branch!r} was requested; "
                 f"switching branches in a shared working tree is not safe"
             )
+
+        if verified_state == "head":
+            # What was judged must be what is committed.
+            self.assert_paths_match_head(scope)
 
         # `-A` with an explicit pathspec stages additions, modifications and
         # deletions *for those paths only*. It is not the blanket `git add -A`.

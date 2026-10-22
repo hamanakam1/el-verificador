@@ -261,7 +261,6 @@ VERIFY_CMD = [
     "--work-package", "work_package.json",
     "--repo", ".",
     "--base", "HEAD~1",
-    "--head", "HEAD",
     "--config", "verificador.yaml",
     "--dry-run",
     "--check-fixture", "checks.json",

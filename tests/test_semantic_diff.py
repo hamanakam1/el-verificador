@@ -270,6 +270,50 @@ class TestTestWeakeningDetection(unittest.TestCase):
         self.assertEqual(diff.weakened_tests, [])
 
 
+class TestWorktreeMode(unittest.TestCase):
+    """The default judges the working tree, which is what gets committed."""
+
+    def setUp(self):
+        self.repo = _Repo()
+        self.addCleanup(self.repo.cleanup)
+
+    def test_uncommitted_work_is_seen(self):
+        self.repo.write("app.py", "def helper():\n    return 1\n")
+        base = self.repo.commit("base")
+        # The agent leaves its work uncommitted.
+        self.repo.write("app.py", "def helper():\n    return 2\n")
+
+        diff = self.repo.diff(base, "WORKTREE")
+        self.assertEqual(diff.files_changed, ["app.py"])
+        modified = [c for c in diff.ast_changes if c.change_type == ChangeType.MODIFIED]
+        self.assertEqual(len(modified), 1)
+        self.assertIn("return 1", modified[0].before)
+        self.assertIn("return 2", modified[0].after)
+
+    def test_committed_work_is_seen_too(self):
+        self.repo.write("app.py", "def helper():\n    return 1\n")
+        base = self.repo.commit("base")
+        self.repo.write("app.py", "def helper():\n    return 2\n")
+        head = self.repo.commit("head")
+
+        diff = self.repo.diff(base, "WORKTREE")
+        self.assertEqual(diff.files_changed, ["app.py"])
+        self.assertTrue(
+            any(c.change_type == ChangeType.MODIFIED for c in diff.ast_changes)
+        )
+        self.assertEqual(diff.files_changed, self.repo.diff(base, head).files_changed)
+
+    def test_the_base_is_always_read_from_the_commit(self):
+        """Reading the base from disk would make every change look empty."""
+        self.repo.write("app.py", "def helper():\n    return 1\n")
+        base = self.repo.commit("base")
+        self.repo.write("app.py", "def helper():\n    return 2\n")
+
+        engine = SemanticDiffEngine(str(self.repo.repo), base, "WORKTREE")
+        self.assertIn("return 1", engine._read_file_at(base, "app.py"))
+        self.assertIn("return 2", engine._read_worktree("app.py"))
+
+
 class TestUnresolvableCommits(unittest.TestCase):
     """A commit that does not exist must not look like "nothing changed"."""
 

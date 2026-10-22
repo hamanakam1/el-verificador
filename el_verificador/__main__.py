@@ -47,7 +47,14 @@ def create_parser() -> argparse.ArgumentParser:
     )
     verify_parser.add_argument("--repo", required=True, help="Path to the repository")
     verify_parser.add_argument("--base", default="HEAD~1", help="Base commit")
-    verify_parser.add_argument("--head", default="HEAD", help="Head commit")
+    verify_parser.add_argument(
+        "--head",
+        default="WORKTREE",
+        help=(
+            "Upper bound of the diff: WORKTREE (the default, and what the "
+            "verifier then commits) or a commit-ish"
+        ),
+    )
     verify_parser.add_argument(
         "--config", help="Path to config YAML (overrides ~/.el-verificador/config.yaml)"
     )

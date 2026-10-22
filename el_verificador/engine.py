@@ -85,6 +85,7 @@ class ElVerificador:
         )
         self._model_calls = 0
         self.acceptance_contract: Optional[AcceptanceContract] = None
+        self.verified_state = "worktree"
 
     # ------------------------------------------------------------------ #
     # Public entry point
@@ -94,7 +95,7 @@ class ElVerificador:
         work_package: Dict[str, Any],
         repo_path: str,
         base_commit: str,
-        head_commit: str = "HEAD",
+        head_commit: str = "WORKTREE",
         taskrivet_retry: Optional[Callable[[CorrectionPrompt], None]] = None,
     ) -> VerificationResult:
         """
@@ -192,6 +193,7 @@ class ElVerificador:
         # Stage 2: Semantic diff / intent alignment
         diff_engine = SemanticDiffEngine(repo_path, base_commit, head_commit)
         semantic_diff = diff_engine.compute(intent)
+        self.verified_state = "worktree" if diff_engine.covers_worktree else "head"
 
         # Stage 3: Resolve the intent into obligations and decide on them.
         evaluator = ObligationEvaluator(
@@ -337,7 +339,16 @@ class ElVerificador:
         total_duration_ms = int((time.time() - start) * 1000)
 
         # Commit on pass, and only the files the verifier evaluated.
-        if result.decision == VerificationDecision.PASS and not self.config.dry_run:
+        #
+        # The commit happens only when the verification judged the working
+        # tree, because that is the content the commit carries. A
+        # verification of a commit range did not judge the working tree, so
+        # committing it would put unverified content in the record.
+        if (
+            result.decision == VerificationDecision.PASS
+            and not self.config.dry_run
+            and self.verified_state == "worktree"
+        ):
             try:
                 message = (
                     f"{self.config.commit_message_prefix} "
@@ -345,7 +356,10 @@ class ElVerificador:
                 )
                 scope = list(result.semantic_diff.files_changed) if result.semantic_diff else []
                 commit_sha = self.deps.git.commit(
-                    message, scope, self.config.commit_branch
+                    message,
+                    scope,
+                    self.config.commit_branch,
+                    verified_state=self.verified_state,
                 )
                 result.committed = True
                 result.edge_record_payload_hash = commit_sha

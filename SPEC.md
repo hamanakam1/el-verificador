@@ -134,6 +134,13 @@ Ticket Board is not implemented (ROADMAP.md §4, Phase 3).
 
 ### 4. State Commit & Teardown — `PARTIAL`
 
+**What was judged must be what is committed.** The diff's upper bound is the
+working tree by default: the agent leaves its work uncommitted, the verifier
+judges exactly that, and the commit carries exactly that. When the upper bound
+is a commit range instead, the working tree was not judged, so the commit step
+is skipped rather than committing content nothing verified.
+
+
 When the code passes both the machine tests and the intent check, El Verificador
 executes the final logistical steps:
 
@@ -324,7 +331,7 @@ All contracts are pydantic v2 models (`extra="forbid"`):
 ## CLI
 
 ```
-python -m el_verificador verify  --work-package wp.json --repo . --base HEAD~1 --head HEAD [--dry-run] [--check-fixture checks.json]
+python -m el_verificador verify  --work-package wp.json --repo . --base HEAD~1 [--head WORKTREE|<commit>] [--dry-run] [--check-fixture checks.json]
 python -m el_verificador audit   --work-package dwp-abc --verify-chain | --receipts
 python -m el_verificador config  --init | --show
 ```

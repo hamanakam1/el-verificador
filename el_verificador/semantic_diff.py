@@ -73,20 +73,41 @@ class _Symbol:
 
 class SemanticDiffEngine:
     """
-    Deterministic AST-aware diff between a base commit and HEAD.
+    Deterministic AST-aware diff between a base commit and the work under
+    review.
+
+    The upper bound is either a commit-ish or `WORKTREE`, the default.
+
+    `WORKTREE` is the default because it is what the verifier commits. The
+    agent leaves its work in the working tree; the verifier judges that work
+    and then commits exactly that. When the upper bound is a commit instead,
+    the working tree is not what was judged, so the commit step is skipped
+    rather than committing content nothing verified.
 
     - Lists changed files via `git diff --name-status` / `--numstat`
     - Counts added/removed lines
-    - Parses Python AST of changed files at base and head
+    - Parses Python AST of changed files at the upper bound
     - Detects added / modified / removed symbols with real source snippets
     - Detects structurally-stub symbols, scoped to what the diff touched
     - Detects weakened tests (deleted, skipped, or de-asserted)
     """
 
-    def __init__(self, repo_path: str, base_commit: str, head_commit: str = "HEAD"):
+    WORKTREE = "WORKTREE"
+
+    def __init__(
+        self,
+        repo_path: str,
+        base_commit: str,
+        head_commit: str = WORKTREE,
+    ):
         self.repo_path = Path(repo_path).resolve()
         self.base_commit = base_commit
         self.head_commit = head_commit
+
+    @property
+    def covers_worktree(self) -> bool:
+        """True when the diff judged the working tree, which is what is committed."""
+        return self.head_commit.strip().upper() == self.WORKTREE
 
     # ------------------------------------------------------------------ #
     # Entry point
@@ -105,7 +126,11 @@ class SemanticDiffEngine:
                 deleted_files.append(change.path)
                 continue
 
-            head_source = self._read_file_at(self.head_commit, change.path)
+            head_source = (
+                self._read_worktree(change.path)
+                if self.covers_worktree
+                else self._read_file_at(self.head_commit, change.path)
+            )
             base_source = (
                 self._read_file_at(self.base_commit, change.path)
                 if change.status != "A"
@@ -154,10 +179,18 @@ class SemanticDiffEngine:
         that is safe but wrong, and one that burns an agent attempt for no
         reason. Say what is actually wrong.
         """
-        for label, commit in (
-            ("base", self.base_commit),
-            ("head", self.head_commit),
-        ):
+        for label, commit in (("base", self.base_commit),):
+            if not commit:
+                raise ValueError(f"the {label} commit was not given")
+            result = self._git(["rev-parse", "--verify", f"{commit}^{{commit}}"])
+            if result.returncode != 0:
+                raise ValueError(
+                    f"the {label} commit {commit!r} does not exist in "
+                    f"{self.repo_path}"
+                )
+        if self.covers_worktree:
+            return
+        for label, commit in (("head", self.head_commit),):
             if not commit:
                 raise ValueError(f"the {label} commit was not given")
             result = self._git(["rev-parse", "--verify", f"{commit}^{{commit}}"])
@@ -170,7 +203,14 @@ class SemanticDiffEngine:
     def _changed_files(self) -> List[_FileChange]:
         """Changed files with their status, from git itself."""
         status_by_path: Dict[str, str] = {}
-        status = self._git(["diff", "--name-status", f"{self.base_commit}...{self.head_commit}"])
+        if self.covers_worktree:
+            # `git diff <base>` compares the base commit with the working
+            # tree, including changes that are not yet committed.
+            status = self._git(["diff", "--name-status", self.base_commit])
+        else:
+            status = self._git(
+                ["diff", "--name-status", f"{self.base_commit}...{self.head_commit}"]
+            )
         for line in status.stdout.splitlines():
             parts = line.split("\t")
             if len(parts) < 2:
@@ -183,9 +223,12 @@ class SemanticDiffEngine:
             else:
                 status_by_path[parts[-1]] = code[0]
 
-        numstat = self._git(
-            ["diff", "--numstat", f"{self.base_commit}...{self.head_commit}"]
-        )
+        if self.covers_worktree:
+            numstat = self._git(["diff", "--numstat", self.base_commit])
+        else:
+            numstat = self._git(
+                ["diff", "--numstat", f"{self.base_commit}...{self.head_commit}"]
+            )
         counts: Dict[str, Tuple[int, int]] = {}
         for line in numstat.stdout.splitlines():
             parts = line.split("\t")
@@ -223,10 +266,22 @@ class SemanticDiffEngine:
             return subprocess.CompletedProcess(args, 1, "", "")
 
     def _read_file_at(self, commit: str, path: str) -> str:
+        """The content of a file at a commit.
+
+        Decoding is lenient: a diff can legitimately contain a binary file.
+        """
         result = self._git(["show", f"{commit}:{path}"])
         if result.returncode == 0:
             return str(result.stdout)
         return ""
+
+    def _read_worktree(self, path: str) -> str:
+        """The content of a file on disk, decoded leniently."""
+        try:
+            data = (self.repo_path / path).read_bytes()
+        except OSError:
+            return ""
+        return data.decode("utf-8", errors="replace")
 
     # ------------------------------------------------------------------ #
     # AST comparison
