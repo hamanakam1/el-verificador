@@ -45,6 +45,81 @@ in this system is *proposal*, never *adjudication*.
 
 ---
 
+## 0.1 Progress — what has landed
+
+This plan was written against `a1100cf`. The work below has since landed, and
+the document has been reconciled with it. **§2 remains the assessment of the
+build as it was**; §0.1 and Appendix A.11 record what changed.
+
+### Landed: the two damage-capable defects
+
+These went first, because a weak verdict is a quality problem and these are
+safety and data-loss problems.
+
+| Defect | Resolution |
+|---|---|
+| §2.3.1 — dry-run executed agent code on the host | **Fixed.** No acceptance command runs on the host in any mode. A check either runs in the container (`CONTAINER`), is replayed from a recorded fixture (`REPLAY`), or reports that it did not run (`SKIPPED`). A skipped check can never pass, so a dry run can never manufacture a PASS. `DockerRunner.run_check` has no host-execution path at all. |
+| §2.3.3 — `git add -A` staged every file in the tree | **Fixed.** The commit is scoped by explicit path to the files the verifier evaluated. The branch is never switched. A commit that reaches outside the scope fails loudly (`CommitScopeError`) rather than being recorded as a success. |
+
+**A third defect was found while fixing the first:** `Container.exec_run` has
+no `timeout` parameter, so *every* non-dry-run check raised `TypeError`. The
+acceptance pipeline had never actually run outside dry-run mode. The deadline
+is now enforced with a worker thread, and an overrun is reported as exit `124`.
+
+### Landed: the judgement path (§2.2)
+
+| Defect | Resolution |
+|---|---|
+| `MODIFIED` was never emitted | **Fixed.** Each symbol carries its real source text, so a rewritten function body is reported with its before and after. |
+| Intent coverage was decoupled from the code | **Replaced.** The fuzzy score is gone. `obligations.py` resolves the intent into checkable obligations, and the verdict is a pure function of them. |
+| The 0.85 threshold was dead code | **Superseded.** Obligation coverage replaces it, and the decision no longer consults a threshold that nothing enforced. |
+| `fail_on_todo_stubs` was never consulted | **Superseded** by the `no_stub` obligation, which is structural rather than a regex. |
+| The LLM's Correction Prompt was discarded | **Fixed.** The prompt lists the violated obligations, and the locally generated analysis now reaches the prompt. The model still never decides. |
+| Stubs were found by grepping the file | **Fixed.** A symbol is a stub when its body is `pass`, `...`, `raise NotImplementedError`, or a marker string — and stub findings are scoped to the diff, so a pre-existing stub the agent never touched is not its violation. |
+| Weakened tests were invisible | **New.** A deleted, skipped, or de-asserted test is now a violation. Adding `@pytest.mark.skip` to a test is detected because the symbol's source now includes its decorators. |
+| The escalation dropped its evidence | **Fixed.** The failing checks, the diff, the obligations and the evidence hashes all travel with the escalation. |
+| The audit hash did not cover the evidence | **Fixed.** The content hash covers the decision, the rationale, the evidence hashes and the obligation outcomes. The chain is monotonic (`seq`) and written inside one immediate transaction. |
+| The `~/.el-verificador/config.yaml` was never read | **Fixed.** It is read by default and validated through the contract, so an unknown key is an error. |
+| `__post_init__` was never called | **Fixed.** `model_post_init` is the pydantic v2 hook, and paths are expanded. |
+| `datetime.utcnow()` (deprecated) | **Fixed.** Timezone-aware UTC throughout. |
+| The retry loop burned its budget on no-ops | **New.** A working-tree fingerprint ends the loop when the agent changed nothing. |
+| An inconclusive run was retried | **New.** When nothing ran there is nothing to fix. |
+
+### Landed: the regression harness
+
+The diff engine — the module that answers the component's central question —
+**had no test file at all**, and the engine test replaced it with a mock. That
+is how a diff engine which could not see a rewritten function body shipped
+green through four commits.
+
+- **The golden fixture suite** (`tests/fixtures/golden/`, 8 cases) — synthetic
+  repositories with known verdicts, verified end to end through real git
+  against the real diff engine, the real obligation evaluator and the real
+  decision function. `correct_impl` passes; `todo_stub`, `wrong_impl`,
+  `test_gaming`, `scope_creep`, `symbol_missing`, `empty_diff` and
+  `broken_build` each fail, for the right reason.
+- New test modules for the diff engine, the obligations, and the git commit
+  path — the three areas that had none.
+- `ruff` and `mypy --strict` are clean and now run in CI, along with a
+  dedicated job for the golden fixtures.
+
+133 tests pass under both `pytest` and `unittest discover`.
+
+### Still open
+
+| Item | Phase |
+|---|---|
+| The `taskrivet/sandbox:latest` image does not exist and no component provisions it | 1 |
+| Resource limits (CPU, memory, PID) are not enforced, only the wall clock | 1 |
+| The acceptance command list is still the configured default, not the ticket's contract | 1 |
+| `scope_respected` defaults to `warn`, not `enforce` | 2 |
+| The verdict is not yet written to a canonical EdgeRecord receipt | 4 |
+| Ticket Board escalation is a return value, not a write | 3 |
+| The diff engine is Python-only (`ast`, not tree-sitter) | 2, 5 |
+| No content-addressed artifact store; evidence hashes are recorded but the bytes are not retained | 2 |
+
+---
+
 ## 1. What El Verificador is for
 
 ### 1.1 The one-sentence contract

@@ -7,8 +7,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Obligation-based intent alignment.** `el_verificador/obligations.py`
+  resolves the distilled intent into checkable obligations — `change_present`,
+  `acceptance_command`, `no_stub`, `tests_intact`, `scope_respected`,
+  `symbol` and `goal_terms` — each resolving to a status backed by evidence.
+  The verdict is a pure function of that list: any violation fails, any
+  unproven claim means no verdict was reached, and only then does the run
+  pass. The local model may explain the evidence; it never decides it.
+- **A golden fixture suite** (`tests/fixtures/golden/`). Eight synthetic
+  repositories with known verdicts, built into real git repositories and
+  verified end to end. `correct_impl` passes; `todo_stub`, `wrong_impl`,
+  `test_gaming`, `scope_creep`, `symbol_missing`, `empty_diff` and
+  `broken_build` each fail, for the right reason. The diff engine had no test
+  file at all, and the engine test replaced it with a mock.
+- **Test modules for the diff engine, the obligations and the git commit
+  path** — the three areas that had none.
+- **A no-progress guard** in the correction loop. If the working tree did not
+  change after a correction, another attempt cannot produce a different
+  result, so the loop escalates instead of spending the remaining budget.
+- **Weakened-test detection.** A deleted, skipped or de-asserted test is a
+  violation. Adding `@pytest.mark.skip` to a test used to go unnoticed,
+  because a symbol's source did not include its decorators.
+- **A content-addressed check fixture** (`check_fixture`), so a dry run can
+  replay recorded acceptance results instead of executing anything.
+- **`scope_mode`** (`off` / `warn` / `enforce`) controls how a change outside
+  the work package's `related_files` is treated. It defaults to `warn`, so the
+  violation is reported and audited without blocking a pass until the
+  `related_files` contract is trustworthy.
+- **CI gates for `ruff` and `mypy --strict`**, and a dedicated job for the
+  golden fixture suite.
+
+### Changed
+
+- **The verdict is now a decision, not a score.** The old "intent coverage"
+  number measured how many `related_files` were touched — it was identical
+  (0.1) for a correct implementation and for a stub — and the configured 0.85
+  threshold was never consulted. It is superseded by obligation coverage.
+- **The Correction Prompt names the violated obligations**, and the locally
+  generated analysis now reaches the prompt instead of being written to an
+  attribute nothing read. The model still never decides a verdict.
+- **The escalation carries its evidence.** The failing checks, the diff, the
+  violated obligations and the evidence hashes travel with the escalation
+  instead of being dropped at the moment they became most valuable.
+- **The audit hash covers the evidence it attests to.** The content hash now
+  covers the decision, the rationale, the evidence hashes and the obligation
+  outcomes, rather than a single sentence of prose. The chain is ordered by a
+  monotonic `seq` column and written inside one immediate transaction, so
+  concurrent writers cannot fork it.
+- **`~/.el-verificador/config.yaml` is read**, by default, and validated
+  through the contract — an unknown key is an error rather than a silently
+  ignored line. `--config` overrides it.
+- **The CLI reports the obligations** it resolved, the evidence hashes it
+  cited, and distinguishes *inconclusive* from *failed*. Exit codes: `0` pass,
+  `1` fail or escalate, `2` inconclusive.
+- **`SPEC.md` and `AGENTS.md` now describe what the code does.** Every
+  mechanism carries a status marker, so the next agent cannot build on a
+  capability that does not exist.
+
 ### Fixed
 
+- **Acceptance commands could run on the host.** The dry-run path shelled out
+  to the repository working directory, so the one component whose job is to
+  run agent-generated code had a supported path that executed it on the
+  operator's machine, with the operator's credentials, in the operator's real
+  working tree. There is now no host-execution path in any mode: a check
+  either runs inside the container or reports that it did not run, and a
+  skipped check can never pass.
+- **The commit staged every file in the working tree.** `git add -A` swept up
+  changes this process did not make, and `git checkout` switched branches
+  underneath the operator. The commit is now scoped by explicit path to the
+  files the verifier evaluated, the branch is never switched, and a commit
+  that reaches outside the scope fails loudly.
+- **Every non-dry-run check raised `TypeError`.** `Container.exec_run` has no
+  `timeout` parameter, so the acceptance pipeline had never actually run
+  outside dry-run mode. The deadline is now enforced with a worker thread and
+  an overrun is reported as exit `124`.
+- **`MODIFIED` was never reported.** A symbol's "source" was a name-and-kind
+  tag, so a rewritten function body compared equal to itself. A rewrite — the
+  single most important change in the whole exercise — was invisible.
+- **Stubs were found by grepping the file.** A symbol is now a stub when its
+  body is structurally a placeholder, and stub findings are scoped to the
+  diff, so a pre-existing stub the agent never touched is not its violation.
+- **`VerificationConfig.__post_init__` was never called.** Pydantic v2 requires
+  `model_post_init`, so the `~` in `edgerecord_db` was never expanded.
+- **`datetime.utcnow()`** is deprecated and returned a naive datetime. The
+  codebase now uses timezone-aware UTC throughout.
+- **An inconclusive run was retried.** When the checks never executed there
+  is nothing for the agent to fix, so the loop now stops and reports.
+- **A missing sandbox image surfaced as a raw Docker 404.** `start()` called
+  `client.containers.run()` unguarded. When the configured `docker_image`
+  cannot be pulled, the SDK raises `docker.errors.ImageNotFound` and the whole
+  verification dies with a raw HTTP traceback that says nothing about which
+  image failed or what to do about it.
 - **`DockerRunner` crashed on every non-dry-run verification.** The instance
   attribute `_docker_available` shadowed the method `_docker_available()`, so
   any call outside dry-run mode raised
