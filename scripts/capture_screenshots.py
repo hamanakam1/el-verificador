@@ -248,6 +248,7 @@ PASS_FILTER = """{
 
 ESCALATE_FILTER = """{
   decision, passed, committed,
+  escalation_reason,
   escalated_with: {
     failed: [.check_results[] | select(.exit_code != 0) | {kind, command, exit_code}],
     intent_coverage: .semantic_diff.intent_coverage,

@@ -313,6 +313,10 @@ class VerificationResult(BaseModel):
         default=None,
         description="What the commit path did, or why it did nothing",
     )
+    escalation_reason: Optional[str] = Field(
+        default=None,
+        description="Why the run escalated, when it escalated",
+    )
     edge_record_payload_hash: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 

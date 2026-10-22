@@ -89,6 +89,25 @@ class GitOps:
         except OSError:
             return True
 
+    def progress_signature(self) -> str:
+        """A fingerprint of the repository's current state.
+
+        Covers the head commit, the set of changed paths, and how much each
+        one changed — so an edit that leaves the same file names but
+        different contents produces a different signature. Two attempts with
+        the same signature ran against the same tree, and another identical
+        run would fail identically.
+        """
+        import hashlib
+
+        head = self._run(["rev-parse", "HEAD"]).stdout.strip()
+        status = self._run(["status", "--porcelain=v1"]).stdout
+        numstat = self._run(["diff", "HEAD", "--numstat"]).stdout
+        digest = hashlib.sha256(
+            "\0".join((head, status, numstat)).encode("utf-8", "replace")
+        ).hexdigest()
+        return digest
+
     def commit(
         self,
         message: str,

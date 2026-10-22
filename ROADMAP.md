@@ -1303,8 +1303,44 @@ written in.
 the same timestamp.
 
 **Still open, unchanged:** the host-execution fallback in dry-run (§2.3.1), the
-missing sandbox image (§2.3.2), the retry loop re-running the same checks
-without a no-progress detector, and the audit trail still being written to a
+missing sandbox image (§2.3.2), and the audit trail still being written to a
 SQLite table this repository invented rather than to the real EdgeRecord
 (§2.2). The local ledger is the tool's own; it is not yet the system of
 record.
+
+---
+
+## Appendix G — The retry loop no longer spends its budget on an unchanged tree
+
+**G.1 — No progress detector (`correction.py`, `git_ops.py`, `engine.py`)**
+
+The retry loop called `taskrivet_retry(prompt)` and then re-ran the *same*
+checks, with nothing checking whether the agent had changed anything. An
+agent that ignored the correction burned the whole retry budget in seconds,
+and every one of those runs produced the same failure.
+
+*Fix:* the repository is fingerprinted before each attempt. The fingerprint
+covers the head commit, the set of changed paths, and how much each one
+changed — so an edit that leaves the same file names but different contents
+produces a different fingerprint. When two consecutive attempts see the same
+fingerprint, the correction prompt was not acted on and another identical run
+would fail identically, so the loop escalates immediately with that reason
+instead of spending the rest of the budget.
+
+The check is disabled when no probe is configured, and a probe that cannot
+answer is not treated as evidence of no progress.
+
+`VerificationResult.escalation_reason` now carries the reason, so it is
+visible in the result and not only in the audit's rationale. The refreshed
+capture shows the difference:
+
+```json
+"escalation_reason": "the repository did not change between attempt 1 and
+attempt 2; the correction prompt was not acted on, so another identical run
+would fail identically",
+"attempts": [ { "attempt": 1, "decision": "fail", ... } ]
+```
+
+**Still open, unchanged:** the host-execution fallback in dry-run (§2.3.1), the
+missing sandbox image (§2.3.2), and the audit trail not being written to the
+real EdgeRecord (§2.2).

@@ -97,7 +97,12 @@ class ElVerificador:
                     attempt, intent, repo_path, base_commit, head_commit
                 )
 
-            loop = CorrectionLoop(self.config, self.deps.ollama, run_once)
+            loop = CorrectionLoop(
+                self.config,
+                self.deps.ollama,
+                run_once,
+                progress_probe=self._progress_probe,
+            )
 
             if taskrivet_retry is None:
                 # Single attempt, no retry
@@ -130,6 +135,7 @@ class ElVerificador:
                     semantic_diff=last.semantic_diff if last else None,
                     passed=False,
                     committed=False,
+                    escalation_reason=str(exc),
                 )
                 return self._finalize(result, intent, repo_path, start, str(exc))
         finally:
@@ -230,6 +236,13 @@ class ElVerificador:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+    def _progress_probe(self) -> Optional[str]:
+        """A fingerprint of the repository, for the no-progress check."""
+        try:
+            return self.deps.git.progress_signature()
+        except Exception:
+            return None
+
     def _intent_aligned(self, diff: SemanticDiff) -> bool:
         """Did the change actually address the intent?
 

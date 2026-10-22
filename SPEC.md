@@ -97,6 +97,11 @@ blindly say "try again". It acts as a precise debugger:
 - **Crucially:** Enforces a strict iteration limit (`max_retries=3`). If
   Taskrivet fails three times, the loop is broken, the container is paused,
   and the ticket is flagged on the Ticket Board for human intervention
+- **Stops early when nothing changed.** The loop fingerprints the repository
+  before each attempt. If the fingerprint is unchanged since the previous
+  attempt, the correction prompt was not acted on, and another identical run
+  would fail identically — so the loop escalates with that reason instead of
+  spending the rest of the budget to learn nothing.
 
 ### 4. State Commit & Teardown
 
