@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Removed
+
+- **`tests/test_end_to_end.py`** — superseded by `tests/test_golden_fixtures.py`,
+  which builds each fixture into a real git repository and verifies it end to
+  end against a known verdict, with the diff engine, the obligation evaluator,
+  and the decision function all exercised against real git output. The
+  end-to-end script now replays the acceptance command from a recorded
+  fixture, because the verifier does not execute commands on the host.
+
 ### Added
 
 - **The acceptance contract can come from the work package.** The default
