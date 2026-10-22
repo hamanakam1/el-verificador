@@ -309,6 +309,10 @@ class VerificationResult(BaseModel):
     semantic_diff: Optional[SemanticDiff] = None
     passed: bool = False
     committed: bool = False
+    commit_note: Optional[str] = Field(
+        default=None,
+        description="What the commit path did, or why it did nothing",
+    )
     edge_record_payload_hash: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 

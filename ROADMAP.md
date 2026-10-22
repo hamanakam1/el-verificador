@@ -153,6 +153,11 @@ EdgeRecord.
 | **"Fires a cryptographically secure payload to EdgeRecord"** | Writes to `~/.edgerecord/ledger.sqlite`, a SQLite table invented by this repo. **The real EdgeRecord is file-based**: git-tracked JSON receipts in `receipts/`, fingerprinted per `RUN_ERA.md` "Canonical hashing" (recursively key-sorted, compact-separator, `ensure_ascii=False`, SHA-256), chained by `previous_fingerprint`, verified by `playbooks/verify-chain.py`, and enforced by a pre-commit hook. | The audit trail is **not in the system of record**. `el-destilador` has the same defect — it will need a parallel fix, but El Verificador should not compound it. |
 | **"Flags the ticket on the Ticket Board"** | No ticket-board integration exists in the codebase. | The escalation path terminates in a local variable. |
 
+> Two of the findings above are closed: the semantic diff (§2.2, Appendix D)
+> and the commit path (§2.3.3, Appendix E). The `intent_coverage_threshold`
+> remains reported rather than enforced, and is the one part of the semantic
+> diff story that is still incomplete.
+
 ### 2.3 The five defects that matter
 
 #### 2.3.1 Dry-run executes untrusted code on the host
@@ -1179,6 +1184,71 @@ acceptance commands exited zero, no stub was found, and the change provides
 something the goal named"* — not *"the intent was fulfilled"*.
 
 **Still open, unchanged:** the host-execution fallback in dry-run (§2.3.1), the
-missing sandbox image (§2.3.2), `git add -A` in the commit path (§2.3.3), the
-escalation path dropping its evidence (§2.3.4), and the audit trail not being
-written to the real EdgeRecord (§2.2).
+missing sandbox image (§2.3.2), the escalation path dropping its evidence
+(§2.3.4), and the audit trail not being written to the real EdgeRecord (§2.2).
+
+---
+
+## Appendix E — Defects confirmed and fixed in the commit and escalation paths
+
+Two more findings from §2.3, confirmed by running the code against a
+repository that contained the operator's untracked files.
+
+**E.1 — `git add -A` on a shared checkout (`git_ops.py`, `engine.py`)**
+
+`GitOps.commit()` ran `git checkout <branch>` then `git add -A` then
+`git commit`. `git add -A` stages *every* file in the tree.
+
+Reproduced on the demo repository with the operator's own files present, a
+verifier that passed the verification produced this commit:
+
+```
+feat(el-verificador): verify dwp-4c81f0a7b2d9 - Add register_user ...
+.env                                    ← a secrets file
+.venv                                   ← an entire virtualenv
+app/routes/users.py
+operator-notes.md                       ← the operator's unrelated work
+verificador.yaml
+work_package.json
+```
+
+The factory's operating rules are explicit and repeated: *"NEVER `git add -A`
+or `git add .`"*, *"Stage only the files you personally changed"*, *"Treat all
+pre-existing tracked and untracked changes as other sessions' work."* A
+verifier that commits to `main` with a blanket add is a data-loss vector, and
+it is the one component whose failure is least likely to be noticed, because
+the commit is supposed to look like a success.
+
+*Fix:* the set of paths to stage is an explicit argument, and there is no
+blanket add anywhere in the commit path. The commit is refused when the index
+already holds staged work the verification did not review, and when the
+working tree's copy of a reviewed file differs from the commit that was
+actually inspected — committing that would put unverified bytes into a commit
+carrying a verification receipt. When the reviewed paths are already
+committed, the outcome is recorded as `already-committed` rather than as a
+commit the verifier made. `VerificationResult.commit_note` always says what
+happened, and the audit record carries it, so "nothing was committed" is never
+unexplained.
+
+After the fix, the same run commits only `app/routes/users.py` and leaves
+`.env`, `.venv`, `operator-notes.md`, and the verifier's own config in the
+working tree, where they belong.
+
+**E.2 — The escalation path discarded its evidence (`engine.py`)**
+
+On `RetryExhausted`, `engine.verify()` built a fresh `VerificationResult`
+with no `check_results` and no `semantic_diff`. The SPEC promises escalation
+*"with full context"*; the implementation escalated with a count. The failing
+test output, the stack trace, and the semantic diff — the exact material a
+human needs to fix the ticket — were dropped at the moment they became most
+valuable, and the audit record for an escalation said `intent_coverage=no_diff`.
+
+*Fix:* the last attempt's check results and semantic diff are carried into
+the escalating result, and the audit record lists the failed checks
+explicitly. The escalation now arrives with the evidence it exists to
+deliver.
+
+**Still open, unchanged:** the host-execution fallback in dry-run (§2.3.1), the
+missing sandbox image (§2.3.2), the retry loop re-running the same checks
+without a no-progress detector, the audit hash not covering its own evidence
+(§2.3.5), and the audit trail not being written to the real EdgeRecord (§2.2).

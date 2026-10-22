@@ -248,6 +248,12 @@ PASS_FILTER = """{
 
 ESCALATE_FILTER = """{
   decision, passed, committed,
+  escalated_with: {
+    failed: [.check_results[] | select(.exit_code != 0) | {kind, command, exit_code}],
+    intent_coverage: .semantic_diff.intent_coverage,
+    todo_stubs: .semantic_diff.has_todo_stubs,
+    stub_symbols: .semantic_diff.stub_symbols
+  },
   attempts: [.attempts[] | {
     attempt, decision, duration_ms,
     failed: [.check_results[] | select(.exit_code != 0) | {kind, command, exit_code}]
@@ -364,7 +370,7 @@ def capture_failure(outdir: Path, tmp: Path) -> None:
     pretty = run_jq(out[json_start:], ESCALATE_FILTER, work)
 
     body = prompt_line(
-        PROMPT_VERIFY + " | jq '{decision, attempts}'",
+        PROMPT_VERIFY + " | jq '{decision, escalated_with, attempts}'",
         "demo-project",
     ) + pretty
 

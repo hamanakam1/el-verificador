@@ -194,6 +194,62 @@ class TestEngineDryRun(unittest.TestCase):
             )
         self.assertEqual(result.decision, VerificationDecision.PASS)
 
+    def test_escalation_carries_the_evidence_it_exists_to_deliver(self):
+        """An exhausted retry budget must not arrive with the evidence removed.
+
+        The escalation exists so a human can pick the work up. If the check
+        results and the semantic diff are dropped on the way out, the human
+        gets a count and nothing else.
+        """
+        fail_check = CheckResult(
+            kind=CheckKind.UNIT_TESTS,
+            command="pytest -q",
+            exit_code=1,
+            stdout="1 failed",
+            stderr="TypeError: not subscriptable",
+        )
+        stubbed = SemanticDiff(
+            repo_path="/tmp/repo",
+            base_commit="a" * 40,
+            head_commit="b" * 40,
+            files_changed=["app/auth.py"],
+            added_lines=3,
+            removed_lines=0,
+            ast_changes=[],
+            intent_coverage=0.2,
+            has_todo_stubs=True,
+            stub_symbols=["login"],
+        )
+        docker = _FakeDocker([fail_check])
+        deps = VerifierDependencies(docker=docker, git=MagicMock(), ollama=MagicMock())
+        verifier = ElVerificador(self.config, deps=deps)
+        prompts = []
+
+        def retry(prompt):
+            prompts.append(prompt)
+
+        with patch(
+            "el_verificador.engine.SemanticDiffEngine"
+        ) as mock_engine:
+            instance = mock_engine.return_value
+            instance.compute.return_value = stubbed
+            result = asyncio.run(
+                verifier.verify(
+                    self.work_package, "/tmp/repo", "a" * 40, "b" * 40,
+                    taskrivet_retry=retry,
+                )
+            )
+        self.assertEqual(result.decision, VerificationDecision.ESCALATE)
+        # The budget is spent, and the correction prompts were handed over.
+        self.assertEqual(len(prompts), self.config.max_retries - 1)
+        # The evidence survives.
+        self.assertTrue(result.check_results)
+        self.assertFalse(result.check_results[0].passed)
+        self.assertIn("TypeError", result.check_results[0].stderr)
+        self.assertIsNotNone(result.semantic_diff)
+        self.assertTrue(result.semantic_diff.has_todo_stubs)
+        self.assertIn("login", result.semantic_diff.stub_symbols)
+
 
 if __name__ == "__main__":
     unittest.main()
