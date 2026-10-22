@@ -33,6 +33,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .schemas import CheckExecution, CheckKind, CheckResult, VerificationConfig
 
+try:  # pragma: no cover - the SDK is an optional runtime dependency
+    from docker.errors import DockerException, ImageNotFound
+except ImportError:  # pragma: no cover
+    DockerException = ImageNotFound = RuntimeError
+
 
 class SandboxUnavailableError(RuntimeError):
     """Raised when the Docker sandbox cannot be provisioned.
@@ -95,9 +100,9 @@ class DockerRunner:
                 "recorded results without executing anything"
             )
 
-        import docker
+        from docker.client import from_env
 
-        client = docker.from_env()
+        client = from_env()
         repo_path = str(Path(repo_path).resolve())
 
         try:
@@ -117,12 +122,12 @@ class DockerRunner:
                 nano_cpus=int(self.config.docker_cpu_limit * 1_000_000_000),
                 pids_limit=self.config.docker_pids_limit,
             )
-        except docker.errors.ImageNotFound as exc:
+        except ImageNotFound as exc:
             raise SandboxUnavailableError(
                 f"sandbox image {self.config.docker_image!r} could not be pulled; "
                 f"build it or point docker_image at an existing image"
             ) from exc
-        except docker.errors.DockerException as exc:
+        except DockerException as exc:
             raise SandboxUnavailableError(
                 f"sandbox could not be provisioned: {exc}"
             ) from exc
@@ -141,9 +146,9 @@ class DockerRunner:
 
         if self._container.is_container:
             try:
-                import docker
+                from docker.client import from_env
 
-                client = docker.from_env()
+                client = from_env()
                 container = client.containers.get(self._container.container_id)
                 container.stop(timeout=10)
                 container.remove(force=True)
@@ -164,9 +169,9 @@ class DockerRunner:
             return self._replay_or_skip(kind, command, start)
 
         assert self._container is not None, "Sandbox not started"
-        import docker
+        from docker.client import from_env
 
-        client = docker.from_env()
+        client = from_env()
         container = client.containers.get(self._container.container_id)
 
         exit_code, stdout, stderr, timed_out = self._exec_with_timeout(
@@ -339,9 +344,9 @@ class DockerRunner:
         if self._docker_ok is not None:
             return self._docker_ok
         try:
-            import docker  # noqa: F401
+            from docker.client import from_env  # noqa: F401
 
-            client = docker.from_env()
+            client = from_env()
             client.ping()
             self._docker_ok = True
         except Exception:

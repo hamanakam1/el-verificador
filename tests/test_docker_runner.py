@@ -164,7 +164,7 @@ class TestDockerRunnerLiveMode(unittest.TestCase):
                     raise docker.errors.ImageNotFound("pull access denied")
 
         with mock.patch.object(DockerRunner, "_docker_available", return_value=True):
-            with mock.patch("docker.from_env", return_value=_FakeClient()):
+            with mock.patch("docker.client.from_env", return_value=_FakeClient()):
                 with self.assertRaises(SandboxUnavailableError) as ctx:
                     runner.start(self.repo)
         self.assertIn(self.config.docker_image, str(ctx.exception))

@@ -98,10 +98,16 @@ class TestAuditChain(unittest.TestCase):
         return audit
 
     def _ids(self) -> list:
+        """The record ids, oldest first."""
         with sqlite3.connect(self.db) as conn:
             conn.row_factory = sqlite3.Row
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(verification_audits)")
+            }
+            order = "seq" if "seq" in columns else "timestamp"
             rows = conn.execute(
-                "SELECT id FROM verification_audits"
+                f"SELECT id FROM verification_audits ORDER BY {order}"
             ).fetchall()
         return [row["id"] for row in rows]
 
