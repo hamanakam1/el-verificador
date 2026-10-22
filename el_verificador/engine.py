@@ -153,8 +153,14 @@ class ElVerificador:
         base_commit: str,
         head_commit: str,
     ) -> VerificationResult:
-        # Stage 1: Independent acceptance testing inside the sandbox
-        check_results = self.deps.docker.run_all()
+        # Stage 1: Independent acceptance testing inside the sandbox.
+        #
+        # The contract is the one the work package came with, when it
+        # declared one; otherwise the configured default. A Go project
+        # verified with `pytest -q` is not verified at all, so which
+        # contract was used is recorded with the result.
+        commands, source = self._acceptance_contract(intent)
+        check_results = self.deps.docker.run_all(commands=commands)
 
         # Stage 2: Semantic diff / intent alignment
         diff_engine = SemanticDiffEngine(repo_path, base_commit, head_commit)
@@ -175,8 +181,16 @@ class ElVerificador:
             decision=decision,
             check_results=check_results,
             semantic_diff=semantic_diff,
+            acceptance_contract_source=source,
+            acceptance_commands=list(commands),
             passed=decision == VerificationDecision.PASS,
         )
+
+    def _acceptance_contract(self, intent: IntentPackage) -> tuple[list[str], str]:
+        """The commands to run, and where they came from."""
+        if intent.acceptance_commands:
+            return list(intent.acceptance_commands), "work-package"
+        return list(self.config.test_commands), "config"
 
     # ------------------------------------------------------------------ #
     # Finalization: commit, teardown, EdgeRecord audit payload
@@ -358,6 +372,11 @@ class ElVerificador:
         key_evidence.extend(self._coverage_evidence(result.semantic_diff))
         if result.commit_note:
             key_evidence.append(f"commit={result.commit_note}")
+        if result.acceptance_contract_source:
+            key_evidence.append(
+                f"acceptance_contract={result.acceptance_contract_source} "
+                f"({len(result.acceptance_commands)} commands)"
+            )
 
         audit = VerificationAudit(
             work_package_id=intent.id,

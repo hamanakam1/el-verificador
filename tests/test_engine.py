@@ -30,7 +30,8 @@ class _FakeDocker:
     def teardown(self):
         self.teardown_called = True
 
-    def run_all(self):
+    def run_all(self, commands=None):
+        self.commands = list(commands) if commands else None
         return list(self.results)
 
     def run_check(self, kind, command):

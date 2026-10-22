@@ -31,15 +31,32 @@ is safe to commit. Every verification decision is immutably logged to EdgeRecord
 
 ### 1. Independent Acceptance Testing
 
-El Verificador provisions the Docker sandbox hydrated by El Hidratador and runs
-the acceptance pipeline inside it:
+El Verificador runs the acceptance contract the work actually specified, in
+the Docker sandbox hydrated by El Hidratador.
+
+**The contract.** The default is three Python commands — unit tests, lint,
+and a security scan — because that is the common case:
 
 1. Unit tests (`pytest -q`)
 2. Lint (`ruff check .`)
 3. Security scan (`bandit -r . -q`)
 
-Only a container exit code of `0` for every check counts. Taskrivet's
-self-reported status is never trusted.
+But a Go project verified with `pytest -q` is not verified at all: the
+verdict is about the tool rather than about the work. So the work package may
+carry its own contract, and the verifier runs that instead:
+
+- an explicit list, under `acceptance_commands`;
+- a fenced code block inside the acceptance criteria, which is how a ticket
+  written for a human usually states the commands to run.
+
+When the work package declares no contract, the configured default is used.
+**Which contract was used is recorded** — `VerificationResult.acceptance_contract_source`
+is `work-package` or `config`, the commands are recorded with the result, and
+the audit record carries both. A decision that does not say what it measured
+cannot be reviewed.
+
+Only an exit code of `0` for every check counts. Taskrivet's self-reported
+status is never trusted.
 
 **When there is no sandbox, the checks are not run on the host.** The
 repository under test contains code the agent wrote, and running its test
