@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from el_verificador.docker_runner import HOST_EXECUTION_REFUSED, DockerRunner
 from el_verificador.engine import ElVerificador, VerifierDependencies
@@ -123,9 +124,13 @@ class _EndToEnd(unittest.TestCase):
 
     def _verify(self, allow_host: bool = True):
         verifier = self._verifier(allow_host)
-        return asyncio.run(
-            verifier.verify(WORK_PACKAGE, str(self.repo), "HEAD~1", "HEAD")
-        )
+        # The sandbox is forced unavailable so the test behaves the same on a
+        # machine with Docker and one without. The host path is what the
+        # opt-in governs, and that is the path under test.
+        with patch.object(DockerRunner, "_docker_available", return_value=False):
+            return asyncio.run(
+                verifier.verify(WORK_PACKAGE, str(self.repo), "HEAD~1", "HEAD")
+            )
 
 
 class TestEndToEnd(_EndToEnd):
