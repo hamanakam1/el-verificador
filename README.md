@@ -8,9 +8,27 @@ E      L       V V  E     R  R     I   F       I   C     A   A D   D O   O R  R
 EEEEEE LLLLL    V   EEEEE R   R   IIIII F     IIIII  CCCC A   A DDDD   OOO  R   R
 ```
 
+[![Tests](https://github.com/hamanakam1/el-verificador/actions/workflows/tests.yml/badge.svg)](https://github.com/hamanakam1/el-verificador/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![Runtime dependencies: 4](https://img.shields.io/badge/runtime%20dependencies-4-blueviolet)](pyproject.toml)
+[![Releases](https://img.shields.io/github/v/release/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador/releases)
+
 **The building inspector. Independent intent verification and guardrailed feedback routing for the Taskrivet pipeline.**
 
 > *Taskrivet cannot grade its own homework. El Verificador is the gate between "code written" and "code committed".*
+
+[![Tests](https://img.shields.io/github/actions/workflow/status/hamanakam1/el-verificador/tests.yml?branch=main&label=tests)](https://github.com/hamanakam1/el-verificador/actions/workflows/tests.yml)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+[![Repo size](https://img.shields.io/github/repo-size/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador)
+[![Language](https://img.shields.io/github/languages/top/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador)
+[![Last commit](https://img.shields.io/github/last-commit/hamanakam1/el-verificador/commits/main)](https://github.com/hamanakam1/el-verificador/commits/main)
+[![Stars](https://img.shields.io/github/stars/hamanakam1/el-verificador?style=social)](https://github.com/hamanakam1/el-verificador/stargazers)
+[![Forks](https://img.shields.io/github/forks/hamanakam1/el-verificador?style=social)](https://github.com/hamanakam1/el-verificador/network/members)
+[![Issues](https://img.shields.io/github/issues/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador/issues)
+[![Contributors](https://img.shields.io/github/contributors/hamanakam1/el-verificador/graphs/contributors)](https://github.com/hamanakam1/el-verificador/graphs/contributors)
+[![Commit activity](https://img.shields.io/github/commit-activity/m/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador/commits/main)
 
 ---
 
@@ -50,6 +68,46 @@ When the code passes both machine tests and the semantic intent check, El Verifi
 5. **Taskrivet:** Executes the code inside the sandbox
 6. **El Verificador:** Audits the execution, manages the retry loop, and commits the state to EdgeRecord
 
+## Screenshots
+
+Every image below is a **real captured CLI run**, replayed into a terminal
+window — not a mock-up. The demo repository is a two-commit miniature of the
+kind of project Taskrivet would be asked to modify, built and verified for
+real. Reproduce the whole set with:
+
+```bash
+python scripts/capture_screenshots.py
+```
+
+### A passing verification
+
+Acceptance checks ran, the intent diff was computed, the code was committed:
+
+![El Verificador verifying a passing work package](docs/screenshots/01-verify-pass.png)
+
+### A bounded Correction Prompt, handed back to Taskrivet
+
+The exact failing assertion, the lint error, and the semantic diff — bounded,
+and addressed to the agent that has to fix it:
+
+![El Verificador producing a Correction Prompt for Taskrivet](docs/screenshots/02-correction-prompt.png)
+
+### The guardrail: three attempts, then escalation
+
+The retry budget is hard. On exhaustion the loop breaks and the work is flagged
+for a human instead of being retried forever:
+
+![El Verificador escalating after the retry budget is exhausted](docs/screenshots/03-escalate.png)
+
+### A tamper-evident audit trail
+
+Each decision is content-hashed and chained to the previous one, so the record
+of *what was decided and why* cannot be quietly rewritten:
+
+![El Verificador audit chain verification](docs/screenshots/04-audit-chain.png)
+
+![El Verificador audit trail for one work package](docs/screenshots/05-audit-trail.png)
+
 ## Design Principles
 
 - **Independent by construction** — Never trusts Taskrivet's self-reported status
@@ -61,9 +119,24 @@ When the code passes both machine tests and the semantic intent check, El Verifi
 
 ## Status
 
-**Implemented** — Python package with data contracts, Docker sandbox runner,
-semantic-diff intent alignment, guardrailed retry loop, git commit + teardown,
-and EdgeRecord audit logging. Run in `dry_run` mode for offline development.
+**Alpha — the core loop runs; the pipeline is not yet connected.**
+
+Implemented and tested (26 tests green): the data contracts, the Docker sandbox
+runner, the AST semantic diff, the guardrailed retry loop, git commit +
+teardown, and the hash-chained audit ledger. The verification cycle has run
+end-to-end against a real repository — see the screenshots above.
+
+**Known gaps, all tracked in [docs/ROADMAP.md](docs/ROADMAP.md):**
+
+- Taskrivet dispatch, Ticket Board escalation, and a canonical EdgeRecord
+  receipt do not exist yet. `ESCALATE` is currently a return value, not an
+  escalation.
+- The intent-coverage score is not yet a valid gate: it is structurally capped
+  at `0.4` while the configured threshold is `0.85`, and the threshold is not
+  currently enforced. Fixing the metric changes what passes and what fails, so
+  it is called out as an operator decision rather than done silently.
+- The EdgeRecord audit record is written to a local SQLite ledger
+  (`~/.edgerecord/ledger.sqlite`), not to a canonical EdgeRecord receipt.
 
 ## Quick Start
 
@@ -78,6 +151,9 @@ python -m el_verificador verify \
   --base HEAD~1 \
   --head HEAD \
   --dry-run
+
+# 3. Check the audit trail
+python -m el_verificador audit --verify-chain
 ```
 
 ## Verification Cycle
@@ -90,4 +166,14 @@ python -m el_verificador verify \
 | Exhaustion | Loop breaks; ticket flagged for human intervention with full context |
 | Pass | Code committed, sandbox torn down, audit payload fired to EdgeRecord |
 
-See `AGENTS.md` for contributor conventions.
+## Documentation
+
+| Document | What it covers |
+|----------|----------------|
+| [docs/ROADMAP.md](docs/ROADMAP.md) | The long-term build plan: verified defect list, target architecture, six phases with exit gates, integration contracts, risk register, and the decisions that need an operator |
+| [SPEC.md](SPEC.md) | The system specification |
+| [AGENTS.md](AGENTS.md) | Contributor conventions for agents and humans |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+| [SECURITY.md](SECURITY.md) | Security posture and reporting |
+| [docs/screenshots/](docs/screenshots/) | The captured CLI runs shown above |
+| [docs/examples/](docs/examples/) | The demo repository the screenshots verify |
