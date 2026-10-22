@@ -96,6 +96,18 @@ is now enforced with a worker thread, and an overrun is reported as exit `124`.
 | The `taskrivet/sandbox:latest` image did not exist | **Fixed.** `docker/verification/Dockerfile` builds it: the acceptance toolchain baked in so the runtime container needs no network, a non-root uid, and resource caps (memory, CPU, PIDs) that are part of the isolation contract. A CI job builds it and runs the acceptance checks inside it. |
 | The verifier was an island nothing could call | **Fixed.** `mcp_server.py` serves `verify_work_package`, `verification_status`, `verification_evidence` and `verify_receipt_chain` over stdio. An agent asks the verifier instead of reimplementing checks — which is what keeps the checker from being the author. |
 
+### Landed: the correction loop and the record
+
+| Defect | Resolution |
+|---|---|
+| A commit that judged HEAD but committed the working tree | **Fixed.** The diff's upper bound is the working tree by default, so the commit carries exactly what was judged. Judging a commit range is still possible; the commit step is then skipped rather than committing content nothing verified. A commit that judged HEAD is refused outright if the working tree moved on. |
+| The retry budget was never consulted | **Fixed.** `max_retry_duration_ms` now bounds the loop beside the attempt count. |
+| A failed attempt and a retried attempt looked identical | **Fixed.** `VerificationDecision.RETRY` is now produced, so the attempt log reads *retry, retry, fail* instead of three identical failures. |
+| The correction prompt listed passing checks under "Failed Checks", and presented a one-line notice as a "stack trace" | **Fixed.** Only the checks that failed are listed, and the stack-trace section holds actual tracebacks. |
+| The correction prompt invited the agent to adjust the gate | **Fixed.** A real CLI walkthrough found the local model's analysis telling the agent to "record a passing check fixture". The composer's instructions and the rendered prompt now say the gate is not the agent's to adjust. |
+| A commit that does not exist looked like a change that never happened | **Fixed.** The diff engine says which commit is missing. |
+| The intent-coverage threshold was dead code | **Fixed.** It is a real, secondary guard now. A single violated obligation still fails the run on its own. |
+
 ### Landed: the regression harness
 
 The diff engine — the module that answers the component's central question —
@@ -103,18 +115,21 @@ The diff engine — the module that answers the component's central question —
 is how a diff engine which could not see a rewritten function body shipped
 green through four commits.
 
-- **The golden fixture suite** (`tests/fixtures/golden/`, 8 cases) — synthetic
+- **The golden fixture suite** (`tests/fixtures/golden/`, 9 cases) — synthetic
   repositories with known verdicts, verified end to end through real git
   against the real diff engine, the real obligation evaluator and the real
   decision function. `correct_impl` passes; `todo_stub`, `wrong_impl`,
-  `test_gaming`, `scope_creep`, `symbol_missing`, `empty_diff` and
-  `broken_build` each fail, for the right reason.
+  `test_gaming`, `scope_creep`, `symbol_missing`, `empty_diff`,
+  `broken_build` and `contract_honoured` each fail, for the right reason.
+  The last one proves the work package's own acceptance command is the one
+  that runs, not the configured default.
 - New test modules for the diff engine, the obligations, and the git commit
   path — the three areas that had none.
 - `ruff` and `mypy --strict` are clean and now run in CI, along with a
   dedicated job for the golden fixtures.
 
-133 tests pass under both `pytest` and `unittest discover`.
+215 tests pass under both `pytest` and `unittest discover`, and the suite is
+hermetic: it writes nothing into `~/.el-verificador/`.
 
 ### Still open
 
@@ -126,7 +141,7 @@ green through four commits.
 | The verdict is not yet written to the *operator's* EdgeRecord cycle journal. The receipts are this component's own chain, in the cross-component contract, and do not interleave with the operator's cycles. | 4 |
 | The diff engine is Python-only (`ast`, not tree-sitter). Python is 8,228 files across the factory against 875 for JavaScript and TypeScript, so this is a Phase 5 concern rather than a blocker. | 2, 5 |
 | `goal_terms` is lexical, not semantic. A deeper check needs the acceptance contract's explicit behaviours. | 2 |
-| No metrics yet: pass rate, escalation rate by category, false-positive rate | 5 |
+| The false-positive rate is unmeasured. The metrics report pass and escalation rates, but nobody has sampled the escalations to see how many were the verifier's fault. | 5 |
 
 ---
 
