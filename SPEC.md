@@ -182,9 +182,17 @@ Non-contract integration surface:
 Every verification decision is written to the EdgeRecord SQLite ledger (WAL
 mode) at `~/.edgerecord/ledger.sqlite`:
 
-- Content hash = SHA256 of decision content for immutability
-- `previous_audit_hash` chains records for tamper evidence
-- `verify_chain()` validates the full hash chain
+- Content hash = SHA256 over the canonical JSON of the whole decision — the
+  work package, the repository, the decision, the rationale, **the key
+  evidence**, the attempt count, the timing, and the timestamp. The digest
+  covers the evidence, not only the sentence that describes it.
+- `previous_audit_hash` chains records for tamper evidence, in the order they
+  were written rather than the order of their timestamps.
+- `verify_chain()` validates the chain **and re-hashes every record**: a
+  record whose contents were edited after it was written no longer matches
+  its stored digest, and the chain reports which record broke and why.
+- One definition of the hash. The model computes it, the writer stores it,
+  and the verifier recomputes it from the same canonical form.
 
 ---
 

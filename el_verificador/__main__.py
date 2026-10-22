@@ -154,8 +154,11 @@ async def cmd_audit(args: argparse.Namespace) -> int:
     )
     logger = EdgeRecordLogger(db_path)
     if args.verify_chain:
-        ok = logger.verify_chain()
-        print(f"Audit chain valid: {ok}")
+        ok, reason = logger.chain_status()
+        if ok:
+            print(f"Audit chain valid: True ({reason})")
+        else:
+            print(f"Audit chain valid: False — {reason}")
         return 0 if ok else 1
     if args.work_package:
         chain = logger.get_audit_chain(args.work_package)

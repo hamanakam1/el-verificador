@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The audit hash did not cover the evidence it claimed to protect.** The
+  content hash covered the work package, the decision, the rationale, two
+  booleans, and the timestamp — not the key evidence, the attempt count, the
+  repository, the check results, or the diff. Editing a stored record's
+  evidence left its hash intact. The hash now covers the whole decision,
+  serialised as canonical JSON and hashed with SHA-256.
+- **The audit trail had two definitions of its own hash.** The writer
+  recomputed the digest with a second copy of the formula and overwrote the
+  value the model had computed. There is now one definition, shared by the
+  model, the writer, and the verifier.
+- **The chain verified links but not contents.** A removed record broke the
+  chain; an edited one did not. `verify_chain()` now re-hashes every record
+  from its stored columns and names the record that broke and why.
+  `chain_status()` returns the reason, and the CLI prints it.
+- **The chain was ordered by timestamp**, so two decisions written in the
+  same millisecond could be verified out of order. It now follows insertion
+  order.
+
+### Fixed
+
 - **The commit path staged the entire working tree.** `GitOps.commit()` ran
   `git add -A`, so a passing verification committed the operator's untracked
   files — reproduced on the demo repository, the resulting commit contained a

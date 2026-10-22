@@ -99,9 +99,8 @@ class TestSemanticDiff(unittest.TestCase):
 
 
 class TestVerificationAudit(unittest.TestCase):
-    def test_compute_hash_is_sha256(self):
-        import hashlib
-        audit = VerificationAudit(
+    def _audit(self, **overrides):
+        payload = dict(
             work_package_id="dwp-abc",
             work_package_preview="preview",
             repo_path="/tmp/repo",
@@ -112,17 +111,47 @@ class TestVerificationAudit(unittest.TestCase):
             rationale="All acceptance checks passed and intent aligned",
             key_evidence=["checks_passed=True"],
         )
-        h = audit.compute_hash()
-        # Recompute per schema definition to verify consistency
-        content = (
-            f"{audit.work_package_id}{audit.decision.value}"
-            f"{audit.rationale}{audit.passed}{audit.committed}"
-            f"{audit.timestamp.isoformat()}"
-        )
-        expected = hashlib.sha256(content.encode()).hexdigest()
-        self.assertEqual(h, expected)
-        self.assertEqual(len(h), 64)
-        int(h, 16)
+        payload.update(overrides)
+        return VerificationAudit(**payload)
+
+    def test_compute_hash_is_sha256(self):
+        audit = self._audit()
+        digest = audit.compute_hash()
+        self.assertEqual(len(digest), 64)
+        int(digest, 16)
+
+    def test_the_hash_covers_the_evidence_not_only_the_sentence(self):
+        """Changing anything the record says must change the hash."""
+        base = self._audit().compute_hash()
+        self.assertNotEqual(base, self._audit(key_evidence=["checks_passed=False"]).compute_hash())
+        self.assertNotEqual(base, self._audit(rationale="Something else entirely").compute_hash())
+        self.assertNotEqual(base, self._audit(attempts=3).compute_hash())
+        self.assertNotEqual(base, self._audit(repo_path="/tmp/other").compute_hash())
+        self.assertNotEqual(base, self._audit(passed=False).compute_hash())
+        self.assertNotEqual(base, self._audit(committed=False).compute_hash())
+
+    def test_the_hash_is_stable_for_the_same_content(self):
+        from datetime import datetime
+
+        first = self._audit()
+        second = self._audit()
+        second.id = first.id
+        second.timestamp = datetime.fromisoformat(first.timestamp.isoformat())
+        self.assertEqual(first.compute_hash(), second.compute_hash())
+
+    def test_the_model_and_the_writer_agree_on_the_hash(self):
+        """One definition. The writer must not recompute a second one."""
+        import tempfile
+
+        from el_verificador.schemas import EdgeRecordLogger
+
+        audit = self._audit()
+        model_hash = audit.content_hash
+        with tempfile.TemporaryDirectory() as workdir:
+            logger = EdgeRecordLogger(f"{workdir}/ledger.sqlite")
+            logger.log_decision(audit)
+            logger.close()
+        self.assertEqual(audit.content_hash, model_hash)
 
 
 class TestVerificationResult(unittest.TestCase):

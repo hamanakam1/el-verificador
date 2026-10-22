@@ -366,15 +366,42 @@ class VerificationAudit(BaseModel):
             self.content_hash = self.compute_hash()
         return self
 
-    def compute_hash(self) -> str:
-        """Compute SHA256 of the decision content for immutability."""
-        import hashlib
-        content = (
-            f"{self.work_package_id}{self.decision.value}"
-            f"{self.rationale}{self.passed}{self.committed}"
-            f"{self.timestamp.isoformat()}"
+    def decision_content(self) -> dict:
+        """Everything the record says about the decision.
+
+        The hash covers exactly this mapping. Anything not in it is not
+        protected by the hash, so nothing that is stored as though it were
+        protected may be left out.
+        """
+        from .canonical import decision_content
+
+        return decision_content(
+            audit_id=self.id,
+            timestamp=self.timestamp.isoformat(),
+            work_package_id=self.work_package_id,
+            work_package_preview=self.work_package_preview,
+            repo_path=self.repo_path,
+            decision=self.decision.value,
+            attempts=self.attempts,
+            passed=self.passed,
+            committed=self.committed,
+            rationale=self.rationale,
+            key_evidence=list(self.key_evidence),
+            total_duration_ms=self.total_duration_ms,
+            model_calls=self.model_calls,
         )
-        return hashlib.sha256(content.encode()).hexdigest()
+
+    def compute_hash(self) -> str:
+        """SHA256 of the decision content.
+
+        The digest covers the evidence, not only the sentence: the key
+        evidence, the attempt count, the repository, the work package, and
+        the timing are all inside it. Editing any of them afterwards breaks
+        the hash, which is the point of having one.
+        """
+        from .canonical import digest_of
+
+        return digest_of(self.decision_content())
 
 
 class EdgeRecordLogger:
@@ -431,20 +458,22 @@ class EdgeRecordLogger:
 
     def log_decision(self, audit: 'VerificationAudit') -> str:
         """Write an immutable audit record. Returns the audit ID."""
-        import hashlib
         import json
 
-        content = (
-            f"{audit.work_package_id}{audit.decision.value}"
-            f"{audit.rationale}{audit.passed}{audit.committed}"
-            f"{audit.timestamp.isoformat()}"
-        )
-        audit.content_hash = hashlib.sha256(content.encode()).hexdigest()
+        from .canonical import digest_of
+
+        # One definition of the hash. The model computed it when the record
+        # was created; recomputing it here with a second formula meant the
+        # value in the database was not the value the model had signed.
+        if not audit.content_hash:
+            audit.content_hash = audit.compute_hash()
 
         cursor = self.conn.cursor()
+        # The chain follows the order the records were written, not their
+        # timestamps: two decisions in the same millisecond must still chain.
         cursor.execute(
             "SELECT content_hash FROM verification_audits "
-            "ORDER BY timestamp DESC LIMIT 1"
+            "ORDER BY rowid DESC LIMIT 1"
         )
         row = cursor.fetchone()
         if row:
@@ -491,23 +520,64 @@ class EdgeRecordLogger:
         return [dict(row) for row in cursor.fetchall()]
 
     def verify_chain(self) -> bool:
-        """Verify the integrity of the audit hash chain."""
+        """Verify the integrity of the audit hash chain.
+
+        Two things are checked: that each record links to its predecessor,
+        and that each record still hashes to the value it was stored with.
+        The second check is what makes the chain worth having — it detects a
+        record whose contents were edited after the fact.
+        """
+        ok, _ = self.chain_status()
+        return ok
+
+    def chain_status(self) -> tuple[bool, str]:
+        """Verify the chain and say why it failed, when it did."""
         import sqlite3
+
+        from .canonical import decision_content, digest_of
+
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, content_hash, previous_audit_hash "
-            "FROM verification_audits ORDER BY timestamp"
-        )
-        rows = cursor.fetchall()
+        try:
+            cursor.execute(
+                "SELECT id, timestamp, work_package_id, work_package_preview, "
+                "repo_path, decision, attempts, passed, committed, rationale, "
+                "key_evidence, total_duration_ms, model_calls, content_hash, "
+                "previous_audit_hash FROM verification_audits ORDER BY rowid"
+            )
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
 
-        prev_hash = None
+        previous = None
         for row in rows:
-            if row["previous_audit_hash"] != prev_hash:
-                return False
-            prev_hash = row["content_hash"]
-        return True
+            if row["previous_audit_hash"] != previous:
+                return False, (
+                    f"record {row['id']} does not link to the record before it"
+                )
+            content = decision_content(
+                audit_id=row["id"],
+                timestamp=row["timestamp"],
+                work_package_id=row["work_package_id"],
+                work_package_preview=row["work_package_preview"],
+                repo_path=row["repo_path"],
+                decision=row["decision"],
+                attempts=row["attempts"],
+                passed=row["passed"],
+                committed=row["committed"],
+                rationale=row["rationale"],
+                key_evidence=row["key_evidence"],
+                total_duration_ms=row["total_duration_ms"],
+                model_calls=row["model_calls"],
+            )
+            if digest_of(content) != row["content_hash"]:
+                return False, (
+                    f"record {row['id']} no longer hashes to its stored digest; "
+                    "its contents were changed after it was written"
+                )
+            previous = row["content_hash"]
+        return True, f"{len(rows)} records verified"
 
     def close(self):
         if hasattr(self, 'conn'):
