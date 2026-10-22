@@ -350,7 +350,8 @@ class EndToEndVerification(unittest.TestCase):
                 "--work-package", work_package,
                 "--repo", ".",
                 "--base", "HEAD~1",
-                "--head", "HEAD",
+                # No --head: the default upper bound is the working tree,
+                # which is what the verifier judges and then commits.
                 "--config", "verificador.yaml",
             ],
             cwd=str(self.work),
@@ -471,6 +472,31 @@ class EndToEndVerification(unittest.TestCase):
                 "container",
                 "the harness expected a replayed result",
             )
+
+    def test_a_new_file_that_is_not_tracked_yet_is_part_of_the_change(self):
+        """
+        `git diff` does not list untracked files.
+
+        A brand new module is new work. If it is invisible to the diff, no
+        obligation sees it, no symbol check looks inside it, and the scope
+        check never counts it — the agent could add a file the entire
+        verification never saw.
+        """
+        self._build_repo()
+        new_file = self.work / "app" / "routes" / "sessions.py"
+        new_file.write_text(
+            '"""Session helpers."""\n\n\n'
+            "def issue_session(username: str) -> str:\n"
+            '    return f"session-for-{username}"\n'
+        )
+
+        proc = self._run_cli(replay=True)
+        result = self._result(proc)
+        self.assertIn(
+            "app/routes/sessions.py",
+            result["semantic_diff"]["files_changed"],
+            "a file that git does not track yet was invisible to the verification",
+        )
 
     def test_a_binary_file_in_the_diff_does_not_crash_the_verifier(self):
         self._build_repo()
