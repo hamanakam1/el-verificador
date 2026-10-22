@@ -124,20 +124,36 @@ of *what was decided and why* cannot be quietly rewritten:
 
 **Alpha — the core loop runs; the pipeline is not yet connected.**
 
-Implemented and tested (96 tests green): the data contracts, the Docker sandbox
+Implemented and tested (116 tests green): the data contracts, the Docker sandbox
 runner, the AST semantic diff, the guardrailed retry loop, git commit +
 teardown, and the hash-chained audit ledger. The verification cycle has run
 end-to-end against a real repository — see the screenshots above.
 
 Defects that prevented that from being true are fixed and recorded in
-[ROADMAP.md](ROADMAP.md) Appendices B, D, E, F, and G: every non-dry-run
-verification crashed on a shadowed method, the primary CLI command crashed on
-its JSON serialisation, dry-run checks ran in the wrong directory, the
-semantic diff crashed on binary files in the diff, the semantic diff could not
-see a rewritten function body, the coverage score measured the wrong thing, the
-commit path staged the whole working tree, the escalation path discarded its
-evidence, the audit hash did not cover the evidence it claimed to protect, and
-the retry loop spent its budget on an unchanged repository.
+[ROADMAP.md](ROADMAP.md) Appendices B, D, E, F, G, H, I, and J: every
+non-dry-run verification crashed on a shadowed method, the primary CLI command
+crashed on its JSON serialisation, dry-run checks ran in the wrong directory,
+the semantic diff crashed on binary files in the diff, the semantic diff could
+not see a rewritten function body, the coverage score measured the wrong
+thing, the commit path staged the whole working tree, the escalation path
+discarded its evidence, the audit hash did not cover the evidence it claimed
+to protect, the retry loop spent its budget on an unchanged repository, the
+acceptance contract was hardcoded, the host was a silent fallback for the
+sandbox, and **the audit trail was never written at all** — the logger could
+not be injected, so every verification ran, decided, and recorded nothing.
+
+`scripts/verify_end_to_end.sh` runs the whole cycle through the CLI in a
+temporary directory and prints what was decided and what was recorded:
+
+```bash
+=== verify ===
+decision          : pass
+contract source   : work-package
+intent coverage   : 1.0
+
+=== audit chain ===
+Audit chain valid: True (1 records verified)
+```
 
 **Known gaps, all tracked in [ROADMAP.md](ROADMAP.md):**
 
@@ -150,8 +166,10 @@ the retry loop spent its budget on an unchanged repository.
   work packages, and a correct implementation that spells a name differently
   would score below it. It is called out as an operator decision rather than
   done silently.
-- The EdgeRecord audit record is written to a local SQLite ledger
-  (`~/.edgerecord/ledger.sqlite`), not to a canonical EdgeRecord receipt.
+- The EdgeRecord audit record is written to the verifier's own local ledger
+  (`~/.el-verificador/ledger.sqlite`), not to a canonical EdgeRecord receipt.
+  The ledger is hash-chained and tamper-evident, but it is not yet the system
+  of record.
 
 ## What El Verificador gates
 
