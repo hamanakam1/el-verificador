@@ -170,9 +170,23 @@ class IntentPackage(BaseModel):
     related_files: List[str] = Field(default_factory=list)
     context_packet: Optional[Dict[str, Any]] = None
     estimated_tokens: int = Field(default=8000, ge=1000)
+    acceptance_commands: List[str] = Field(
+        default_factory=list,
+        description=(
+            "The acceptance contract the work package came with, when it "
+            "declared one. The configured default is used otherwise."
+        ),
+    )
+    acceptance_criteria: List[str] = Field(
+        default_factory=list,
+        description="The work package's acceptance criteria, in prose.",
+    )
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "IntentPackage":
+        from .acceptance import acceptance_contract
+
+        commands, criteria = acceptance_contract(data)
         return cls(
             id=data.get("id", f"dwp-{uuid4().hex[:12]}"),
             true_goal=data.get("true_goal", ""),
@@ -180,6 +194,8 @@ class IntentPackage(BaseModel):
             related_files=data.get("related_files", []),
             context_packet=data.get("context_packet"),
             estimated_tokens=data.get("estimated_tokens", 8000),
+            acceptance_commands=commands,
+            acceptance_criteria=criteria,
         )
 
 
@@ -316,6 +332,17 @@ class VerificationResult(BaseModel):
     escalation_reason: Optional[str] = Field(
         default=None,
         description="Why the run escalated, when it escalated",
+    )
+    acceptance_contract_source: Optional[str] = Field(
+        default=None,
+        description=(
+            "Which acceptance contract was run: 'work-package' when the work "
+            "package declared one, 'config' when the configured default was used"
+        ),
+    )
+    acceptance_commands: List[str] = Field(
+        default_factory=list,
+        description="The commands the decision was actually made from",
     )
     edge_record_payload_hash: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)

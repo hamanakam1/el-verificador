@@ -1343,6 +1343,48 @@ EdgeRecord (§2.2).
 
 ---
 
+## Appendix I — The verifier runs the contract the work actually specified
+
+**I.1 — The acceptance contract was hardcoded (`acceptance.py`, `engine.py`)**
+
+`VerificationConfig.test_commands` was the only contract. It is three Python
+commands, which is the right default for a Python repository and the wrong
+one for everything else: a Go project verified with `pytest -q` is not
+verified at all, and the verdict is about the tool rather than about the
+work. Nothing recorded which contract produced a decision either.
+
+*Fix:* the work package may carry its own contract, and the verifier runs it:
+
+- an explicit list, under `acceptance_commands`;
+- a fenced code block inside the acceptance criteria, which is how a ticket
+  written for a human usually states the commands to run.
+
+When the work package declares no contract, the configured default is used.
+`VerificationResult.acceptance_contract_source` records which one was used —
+`work-package` or `config` — the commands are recorded with the result, and
+the audit record carries both. The contract is bounded: at most 16 commands,
+at most 500 characters each, and a criterion with no code block declares
+nothing.
+
+This is the "acceptance contract ingestion" half of Phase 1. The other half —
+structured test results, per-check isolation, resource caps, and the evidence
+store — is not in this change.
+
+**I.2 — The Taskrivet adapter read a field that did not exist
+(`taskrivet_adapter.py`)**
+
+The adapter already tried to read `intent.acceptance_criteria` and
+`intent.acceptance_commands`, defensively, because those fields were not on
+the contract yet. With the contract now carrying them, the adapter joins the
+criteria list rather than passing the list through as a string.
+
+**Still open, unchanged:** the missing sandbox image (§2.3.2), structured
+test results, per-check isolation, resource caps, and the evidence store
+(Phase 1); the obligation model that replaces the coverage score (Phase 2);
+and the audit trail not being written to the real EdgeRecord (§2.2).
+
+---
+
 ## Appendix G — The retry loop no longer spends its budget on an unchanged tree
 
 **G.1 — No progress detector (`correction.py`, `git_ops.py`, `engine.py`)**

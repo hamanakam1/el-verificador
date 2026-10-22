@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **The acceptance contract can come from the work package.** The default
+  contract is still three Python commands, but a work package may now declare
+  its own — as an explicit `acceptance_commands` list, or as a fenced code
+  block inside its acceptance criteria — and the verifier runs that instead.
+  A Go project verified with `pytest -q` was not verified at all. Which
+  contract was used is recorded with the result and in the audit record, so a
+  decision can be checked against what it actually measured.
+
 ### Fixed
 
 - **Acceptance checks fell back to running on the host.** When Docker was

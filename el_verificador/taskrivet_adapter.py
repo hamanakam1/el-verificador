@@ -267,8 +267,11 @@ class TaskrivetAdapter:
         if isinstance(intent, dict):
             intent = IntentPackage.from_dict(intent)
 
+        criteria = getattr(intent, "acceptance_criteria", None) or []
+        if isinstance(criteria, str):
+            criteria = [criteria]
         acceptance = (
-            getattr(intent, "acceptance_criteria", None)
+            "; ".join(criteria)
             or "; ".join(getattr(intent, "acceptance_commands", None) or [])
             or intent.true_goal_summary
             or intent.true_goal

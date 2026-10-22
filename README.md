@@ -196,12 +196,27 @@ python -m el_verificador audit --verify-chain
 
 ### Where the checks run
 
-Acceptance checks run inside the Docker sandbox. When there is no sandbox —
-Docker is not running, or `--dry-run` is set — the checks are **not** run on
-your machine by default, because the repository under test contains code the
-agent wrote, and running its test suite there executes that code with your
-credentials, in your working tree, with your network. A `conftest.py` is
-arbitrary code, and pytest imports it before the tests run.
+Acceptance checks run inside the Docker sandbox, using the contract the work
+package declared when it declared one, and the configured default otherwise.
+A work package can carry its own commands:
+
+```json
+{
+  "id": "dwp-1",
+  "true_goal": "Implement the Go handler for the upload endpoint",
+  "acceptance_commands": ["go test ./...", "go vet ./..."]
+}
+```
+
+or state them in a fenced code block inside its acceptance criteria. Which
+contract produced a decision is recorded with the result.
+
+When there is no sandbox — Docker is not running, or `--dry-run` is set — the
+checks are **not** run on your machine by default, because the repository
+under test contains code the agent wrote, and running its test suite there
+executes that code with your credentials, in your working tree, with your
+network. A `conftest.py` is arbitrary code, and pytest imports it before the
+tests run.
 
 The check is refused with an explanation, and the verification fails closed.
 If you trust the repository and accept that its test code will run on your
