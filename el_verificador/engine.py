@@ -18,6 +18,7 @@ The decision is a pure function of the resolved obligations
 """
 from __future__ import annotations
 
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,7 @@ from .receipt import (
 from .schemas import (
     CheckResult,
     CorrectionPrompt,
+    EdgeRecordLogger,
     IntentPackage,
     SemanticDiff,
     VerificationAudit,
@@ -63,7 +65,10 @@ class VerifierDependencies:
     docker: DockerRunner
     git: GitOps
     ollama: OllamaClient
-    audit_logger: Optional[Any] = None  # EdgeRecordLogger | None
+    # Annotated so that it is a real dataclass field and can be supplied by
+    # the constructor. Left unannotated it was only a class attribute, which
+    # is why the ledger could never be injected.
+    audit_logger: Optional["EdgeRecordLogger"] = None
 
 
 class ElVerificador:
@@ -82,10 +87,43 @@ class ElVerificador:
                 self.config.model_temperature,
                 self.config.model_timeout,
             ),
+            audit_logger=self._default_audit_logger(),
         )
         self._model_calls = 0
         self.acceptance_contract: Optional[AcceptanceContract] = None
         self.verified_state = "worktree"
+
+    # ------------------------------------------------------------------ #
+    # Audit ledger
+    # ------------------------------------------------------------------ #
+    def _default_audit_logger(self) -> Optional[EdgeRecordLogger]:
+        """The ledger every decision is recorded in.
+
+        A verification that cannot be audited is not a verification. The
+        logger is therefore created by default rather than left to the
+        caller: it used to default to ``None`` and nothing ever set it, so
+        the shipped code paths wrote **no audit record at all** and the
+        "Auditable" principle was decorative.
+
+        A ledger that cannot be opened is reported rather than hidden, but it
+        does not stop the verification: the decision still stands, it just
+        cannot be proven afterwards.
+        """
+        if self.config.dry_run:
+            return None
+        try:
+            import os
+
+            from .schemas import EdgeRecordLogger as _EdgeRecordLogger
+
+            return _EdgeRecordLogger(os.path.expanduser(self.config.edgerecord_db))
+        except Exception as exc:  # pragma: no cover - depends on the filesystem
+            print(
+                f"warning: audit ledger unavailable "
+                f"({self.config.edgerecord_db}): {exc}",
+                file=sys.stderr,
+            )
+            return None
 
     # ------------------------------------------------------------------ #
     # Public entry point

@@ -198,6 +198,53 @@ The taskrivet `AGENTS.md` already names this failure mode precisely: *"Do not
 conflate … ledger checks with process isolation."* A green ledger is not a sandbox.
 Phase 1 and Phase 3 exist to make the second half of the rule true.
 
+### 1.5 Autonomy by default — the settled operating decision
+
+**Settled by the operator on 2026-10-22: the least human intervention, the better.**
+
+This is the single design constraint that the rest of the plan is subordinate to,
+and it resolves the hardest question the plan raised — *should the verifier be a
+hard gate or an advisory?* The answer is **hard gate**, with humans reserved for
+genuine exhaustion.
+
+Concretely, it means:
+
+- **The verifier decides.** A failed obligation is a fail, not a suggestion. It
+  is the machine that says no, every time, without asking.
+- **The machine retries before it escalates.** Exhausting the retry budget is
+  the last resort, not the first. A self-repairable failure is repaired by the
+  pipeline; only a failure the pipeline provably cannot fix reaches a human.
+- **A human is a fallback, not a step.** Humans are consulted when the
+  automated path is exhausted *and* the evidence has been packaged so that the
+  human needs one reading and one decision, not an investigation.
+- **Nothing waits for approval that does not need it.** If the gate passes,
+  the change is committed and the pipeline continues without a human in the
+  loop. If the gate fails, the correction loop runs without a human in the loop.
+  Only the exhausted-and-unrepairable case stops.
+
+The consequence for the build order is important: **automation first, humans
+last.** Anything that makes the pipeline *ask more often* is a regression, even
+if it makes the tool more cautious. Anything that makes it *decide more
+reliably* is progress.
+
+### 1.6 The human intervention budget
+
+Every place a human currently sits in the loop, and what replaces it. This is
+the operational form of §1.5: the budget only goes down.
+
+| # | Where a human is today | Target | Phase |
+|---|------------------------|--------|-------|
+| H1 | A human reads the correction prompt and re-issues the work by hand | Taskrivet consumes the Correction Prompt from its own ledger and re-runs automatically | 3 |
+| H2 | A human merges the passing change | The verifier commits the verified change set and the pipeline merges it; no approval step | 1 |
+| H3 | A human decides what "intent" means for each work package | Obligations are derived mechanically from the distilled goal; a human only *adds* obligations for high-stakes work | 2 |
+| H4 | A human reads the audit trail by hand to find out what happened | The receipt chain answers it; a human queries it when they want to | 4 |
+| H5 | A human notices that the gate silently did nothing | The gate is exercised by the end-to-end harness on every commit; a broken gate fails CI | 0 |
+| H6 | A human decides whether the retry budget was enough | The budget is policy; no-progress detection ends a hopeless retry early, and the policy is tuned from measured outcomes | 3 |
+| H7 | A human decides whether a failure was the agent's fault | Obligations carry their evidence; the failure category is derived, not judged | 2 |
+
+The target is **one** human touchpoint in the steady state: the exhausted,
+unrepairable failure. Everything else is the machine's job.
+
 ---
 
 ## 2. Verified assessment of the current build
@@ -927,6 +974,21 @@ working tree. They are not tracked (good) but should be ignored and removed.
 **The north star:** *a work package that passes El Verificador is safe to merge,
 because the proof is reproducible by someone who was not there.*
 
+**And the second north star, settled by the operator (§1.5):** *the pipeline
+reaches that verdict without asking anyone.* A gate that stops to ask is a
+slower gate, and a slower gate gets bypassed. Every phase of this plan is
+measured against two things — the truth of the verdict, and the number of
+humans required to reach it.
+
+| Phase | Human touchpoints remaining (§1.6) |
+|-------|-------------------------------------|
+| Phase 0 | 7 → 6 (the gate stops being invisible: H5) |
+| Phase 1 | 6 → 4 (the merge and the correction hand-back become automatic: H1, H2) |
+| Phase 2 | 4 → 2 (obligations and failure attribution are derived: H3, H7) |
+| Phase 3 | 2 → 1 (the ledger answers for itself: H4) |
+| Phase 4 | 1 → 1 (and the one that remains is cheap, because the evidence is packaged) |
+| Phase 5 | 1 → 1 |
+
 ---
 
 ## 8. Open decisions for the operator
@@ -936,14 +998,21 @@ on it starts. My recommendation is given, but these are not mine to decide.
 
 | # | Decision | Recommendation | Needed by |
 |---|---|---|---|
-| 1 | Does the verifier auto-commit to the target branch, or produce a verified branch + receipt and let a separate authorized act merge? | **Branch + receipt.** Auto-merging to `main` is a footgun in a shared checkout, and the factory's rules already push against it. | Phase 1 |
+| 1 | Does the verifier auto-commit to the target branch, or produce a verified branch + receipt and let a separate authorized act merge? | **Branch + receipt, merged by the pipeline.** Auto-merging to `main` from a shared checkout is a footgun, but *a human merging* is also a human in the loop, which §1.5 forbids. The verifier commits the verified change set to a dedicated branch; the pipeline merges it with no approval step. | Phase 1 |
 | 2 | Who owns the sandbox image — El Verificador or El Hidratador? | **El Hidratador owns the environment description (`SandboxSpec`); El Verificador owns the verification container.** Until the contract exists, El Verificador ships its own image and the README stops claiming otherwise. | Phase 1 |
 | 3 | Should the LLM be allowed to propose obligations at all, or are obligations strictly deterministic? | **Advisory only, recorded in the receipt.** Deterministic-only would be simpler but would miss intent that cannot be mechanically derived. | Phase 2 |
 | 4 | Must the final gate run in a separate process/host for "cannot grade its own homework" to hold? | **Yes.** The MCP tool surface is the natural home. | Phase 3 |
-| 5 | Is 3 the right retry cap, or should it vary by work-package cost? | **Keep 3 as a hard floor; allow a policy to raise it for expensive tickets.** Add the no-progress guard first — most wasted budget comes from no-progress retries, not from too low a cap. | Phase 3 |
+| 5 | Is 3 the right retry cap, or should it vary by work-package cost? | **Keep 3 as a hard floor; allow a policy to raise it for expensive tickets.** Add the no-progress guard first — most wasted budget comes from no-progress retries, not from too low a cap. §1.5 makes this urgent: a retry the pipeline can still win should never be cut short by a human. | Phase 3 |
 | 6 | Multi-language scope: Python-only for how long? | **Python through Phase 2; tree-sitter in Phase 2; JS/TS by Phase 5.** | Phase 5 |
 | 7 | Should the SQLite audit table survive at all? | **As a derived query cache only, clearly labelled.** The receipt chain is the source of truth. | Phase 4 |
 | 8 | Should `el-destilador` be fixed in parallel — it has the same invented-EdgeRecord defect? | **Yes, but not in this repo.** El Destilador needs the same receipt-conformance work. It is a separate change in a separate repo, and it should not block El Verificador. | Phase 4+ |
+
+### 8.1 Settled
+
+| Decision | Ruling | Settled by |
+|----------|--------|-----------|
+| Should the intent check be a **hard gate** or **advisory**? | **Hard gate.** A failing obligation fails the verification. The machine decides; humans are consulted only when the automated path is exhausted and the evidence has been packaged for them. | Operator, 2026-10-22 (§1.5) |
+| How much human involvement is acceptable in the steady state? | **The least, the better.** One touchpoint: the exhausted, unrepairable failure. Every other human step in §1.6 is removed by automation, not by policy. | Operator, 2026-10-22 (§1.5, §1.6) |
 
 ---
 
