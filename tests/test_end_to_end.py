@@ -59,7 +59,9 @@ WORK_PACKAGE = {
     ),
     "true_goal_summary": "Implement create_search_route with an empty-state message.",
     "related_files": ["searchservice/routes.py"],
-    "acceptance_commands": ["python3 -m pytest -q"],
+    # Standard library only, so the fixture runs the same way on every
+    # machine, with or without a test runner installed.
+    "acceptance_commands": ["python3 -m unittest discover -s tests -t . -q"],
 }
 
 
@@ -78,13 +80,17 @@ class _EndToEnd(unittest.TestCase):
         (self.repo / "searchservice").mkdir()
         (self.repo / "searchservice" / "__init__.py").write_text("")
         (self.repo / "tests").mkdir()
+        (self.repo / "tests" / "__init__.py").write_text("")
         (self.repo / "tests" / "test_routes.py").write_text(
+            "import unittest\n"
+            "\n"
             "from searchservice.routes import create_search_route\n"
             "\n"
             "\n"
-            "def test_returns_results():\n"
-            "    payload = create_search_route('x', ['a'])\n"
-            "    assert payload['results'] == ['a']\n"
+            "class TestRoutes(unittest.TestCase):\n"
+            "    def test_returns_results(self):\n"
+            "        payload = create_search_route('x', ['a'])\n"
+            "        self.assertEqual(payload['results'], ['a'])\n"
         )
         (self.repo / "pyproject.toml").write_text(
             "[tool.pytest.ini_options]\npythonpath = ['.']\ntestpaths = ['tests']\n"
