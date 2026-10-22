@@ -287,6 +287,67 @@ class TestCorrectionLoop(unittest.TestCase):
         self.assertIn("Obligations Not Satisfied", prompts[0].render())
         self.assertEqual(loop.model_calls, 0)
 
+    def test_a_retried_attempt_is_recorded_as_a_retry(self):
+        """The attempt log should read as a sequence, not three identical failures."""
+        calls = {"n": 0}
+
+        def run_once(attempt):
+            calls["n"] += 1
+            return self._failing_result(attempt)
+
+        fingerprints = iter(["a", "b", "c", "d"])
+        loop = CorrectionLoop(
+            self.config, self.ollama, run_once, lambda: next(fingerprints)
+        )
+
+        def retry(prompt):
+            pass
+
+        with self.assertRaises(RetryExhausted):
+            asyncio.run(
+                loop.run_until_pass_or_exhausted(
+                    self.intent, "a" * 40, "b" * 40, retry
+                )
+            )
+        decisions = [a.decision for a in loop.attempts]
+        self.assertEqual(
+            decisions,
+            [
+                VerificationDecision.RETRY,
+                VerificationDecision.RETRY,
+                VerificationDecision.FAIL,
+            ],
+        )
+
+    def test_the_wall_clock_budget_bounds_the_loop(self):
+        """A cheap ticket that burns ten minutes has spent more than it was worth."""
+        import time as _time
+
+        config = VerificationConfig(
+            max_retries=5, dry_run=True, max_retry_duration_ms=1
+        )
+        calls = {"n": 0}
+
+        def run_once(attempt):
+            calls["n"] += 1
+            _time.sleep(0.01)
+            return self._failing_result(attempt)
+
+        fingerprints = iter(["a", "b", "c", "d", "e", "f"])
+        loop = CorrectionLoop(config, self.ollama, run_once, lambda: next(fingerprints))
+
+        def retry(prompt):
+            pass
+
+        with self.assertRaises(RetryExhausted) as ctx:
+            asyncio.run(
+                loop.run_until_pass_or_exhausted(
+                    self.intent, "a" * 40, "b" * 40, retry
+                )
+            )
+        self.assertIn("retry budget", str(ctx.exception))
+        self.assertLess(calls["n"], 5)
+
     def test_correction_prompt_fields(self):
         prompt = CorrectionPrompt(
             attempt=2,

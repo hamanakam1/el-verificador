@@ -123,6 +123,7 @@ class CorrectionLoop:
         have Taskrivet re-execute its work inside the sandbox before the
         next verification attempt.
         """
+        budget_started = time.time()
         for attempt in range(1, self.config.max_retries + 1):
             start = time.time()
             result = self._run_verification(attempt)
@@ -159,10 +160,25 @@ class CorrectionLoop:
                     f"escalating to human"
                 )
 
+            # The wall-clock budget is a second bound on the loop, beside the
+            # attempt count. A cheap ticket that burns ten minutes on three
+            # attempts has spent more than it was worth.
+            elapsed_ms = int((time.time() - budget_started) * 1000)
+            if elapsed_ms >= self.config.max_retry_duration_ms:
+                self.attempts.append(attempt_record)
+                raise RetryExhausted(
+                    f"the retry budget of {self.config.max_retry_duration_ms}ms was "
+                    f"spent after {attempt} attempt(s); escalating to human"
+                )
+
             correction_prompt = await self._compose_correction_prompt(
                 attempt, intent, result
             )
             attempt_record.correction_prompt = correction_prompt
+            # This attempt failed and another one is coming: say so, so the
+            # attempt log reads as a sequence rather than three identical
+            # failures.
+            attempt_record.decision = VerificationDecision.RETRY
             self.attempts.append(attempt_record)
 
             # No-progress guard: the agent was asked to fix something. If the
