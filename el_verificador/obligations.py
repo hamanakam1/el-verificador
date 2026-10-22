@@ -131,8 +131,18 @@ def identifiers_in(text: str) -> Set[str]:
 
 
 def _variants(term: str) -> Set[str]:
-    """Snake, camel and plain spellings of a term, for matching."""
+    """Spellings of a term to look for in the change.
+
+    A goal says "returns" and the code says "return"; a goal says
+    "create_user_route" and the code says `createUserRoute`. Without these
+    variants a correct implementation shares no vocabulary with its own goal
+    and the goal obligation fails a change that did exactly what was asked.
+    """
     out = {term}
+    if term.endswith("s") and len(term) > 4:
+        out.add(term[:-1])
+    else:
+        out.add(term + "s")
     if "_" in term:
         parts = term.split("_")
         out.add("".join(parts))
@@ -143,14 +153,17 @@ def _variants(term: str) -> Set[str]:
 
 
 def _haystack(diff: SemanticDiff) -> str:
-    """All changed code text, lowercased, for term matching."""
+    """The text the change produced, lowercased, for term matching.
+
+    Only the *after* side counts. The code that was there before is not what
+    the change delivered, and a goal that happens to match the old
+    implementation has not been addressed.
+    """
     parts: List[str] = []
     for change in diff.ast_changes:
         parts.append(change.name.lower())
         if change.after:
             parts.append(change.after.lower())
-        if change.before:
-            parts.append(change.before.lower())
     for path in diff.files_changed:
         parts.append(path.lower())
     return "\n".join(parts)

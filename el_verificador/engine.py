@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
+from uuid import uuid4
 
 from .acceptance import AcceptanceContract, resolve_acceptance
 from .correction import CorrectionLoop, RetryExhausted
@@ -35,6 +36,12 @@ from .evidence import (
 from .git_ops import GitOps
 from .obligations import ObligationEvaluator, coverage, decide
 from .ollama_client import OllamaClient
+from .receipt import (
+    ReceiptChain,
+    artifact_records,
+    build_receipt,
+    outcome_for_decision,
+)
 from .schemas import (
     CheckResult,
     CorrectionPrompt,
@@ -342,6 +349,11 @@ class ElVerificador:
                 # Commit failure is not a verification failure; record it
                 result.committed = False
 
+        # The durable record: an EdgeRecord receipt, chained to the previous
+        # one. Written whatever the verdict, because a decision that nobody
+        # can find later is a decision that never happened.
+        self._write_receipt(intent, repo_path, result, escalation_reason)
+
         # Build the EdgeRecord audit payload (cryptographically secure)
         audit = self._build_audit(
             intent, repo_path, result, total_duration_ms, escalation_reason
@@ -356,6 +368,65 @@ class ElVerificador:
 
         result.attempts = list(result.attempts)
         return result
+
+    # ------------------------------------------------------------------ #
+    # The durable record
+    # ------------------------------------------------------------------ #
+    def _write_receipt(
+        self,
+        intent: IntentPackage,
+        repo_path: str,
+        result: VerificationResult,
+        escalation_reason: Optional[str],
+    ) -> None:
+        """Append a receipt for this decision to the receipt chain."""
+        try:
+            chain = ReceiptChain(self.config.receipt_dir)
+            receipt = build_receipt(
+                receipt_id=result.receipt_id
+                or f"va-audit-{uuid4().hex[:16]}",
+                kind="verification",
+                outcome=outcome_for_decision(result.decision.value),
+                ticket=None,
+                actor="el-verificador",
+                artifacts=artifact_records(result.evidence_artifacts),
+                notes=(
+                    f"work package {intent.id}: {intent.true_goal_summary}. "
+                    f"Decision {result.decision.value}. "
+                    f"{len(result.evidence_hashes)} evidence artifact(s). "
+                    f"{escalation_reason or ''}"
+                ).strip(),
+                before_state={
+                    "base_commit": result.base_commit,
+                    "head_commit": result.head_commit,
+                    "repo_path": repo_path,
+                },
+                after_state={
+                    "decision": result.decision.value,
+                    "committed": result.committed,
+                    "obligations_satisfied": sum(
+                        1
+                        for o in result.obligations
+                        if o.get("status") == "satisfied"
+                    ),
+                    "obligations_total": len(result.obligations),
+                },
+                detected_changes=[
+                    f"{o.get('kind')}: {o.get('detail', '')[:200]}"
+                    for o in result.blocking_obligations
+                ],
+                summary=(
+                    f"El Verificador {result.decision.value} for work package "
+                    f"{intent.id} ({intent.true_goal_summary})."
+                ),
+            )
+            chain.append(receipt)
+            result.receipt_id = receipt["receipt_id"]
+            result.receipt_fingerprint = receipt["proof_fingerprint"]
+            result.edge_record_payload_hash = receipt["full_hash"]
+        except Exception:
+            # A failure to record must never mask the decision itself.
+            pass
 
     # ------------------------------------------------------------------ #
     # Helpers

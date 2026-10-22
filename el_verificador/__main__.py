@@ -12,6 +12,7 @@ from typing import Any, Coroutine, Dict, Optional
 import yaml
 
 from .engine import ElVerificador
+from .receipt import ReceiptChain
 from .schemas import (
     CorrectionPrompt,
     EdgeRecordLogger,
@@ -68,7 +69,12 @@ def create_parser() -> argparse.ArgumentParser:
         "--work-package", help="Work package ID to query"
     )
     audit_parser.add_argument(
-        "--verify-chain", action="store_true", help="Verify audit chain integrity"
+        "--verify-chain",
+        action="store_true",
+        help="Verify the receipt chain and the ledger cache",
+    )
+    audit_parser.add_argument(
+        "--receipts", action="store_true", help="List the durable receipt chain"
     )
 
     config_parser = subparsers.add_parser(
@@ -231,17 +237,38 @@ def _report(result: VerificationResult) -> None:
 async def cmd_audit(args: argparse.Namespace) -> int:
     config = load_config()
     db_path = os.environ.get("EL_VERIFICADOR_DB", config.edgerecord_db)
-    logger = EdgeRecordLogger(db_path)
+
+    if args.receipts:
+        chain = ReceiptChain(config.receipt_dir)
+        for receipt in chain.receipts():
+            print(
+                f"{receipt.get('receipt_id')}  {receipt.get('outcome', ''):8} "
+                f"{receipt.get('proof_fingerprint', '')}  "
+                f"{receipt.get('summary', '')[:70]}"
+            )
+        return 0
+
     if args.verify_chain:
-        ok = logger.verify_chain()
-        print(f"Audit chain valid: {ok}")
-        return 0 if ok else 1
+        # The receipt chain is the durable record. The SQLite ledger is a
+        # query cache over it, and is checked as a second opinion.
+        receipt_chain = ReceiptChain(config.receipt_dir)
+        receipts_ok = receipt_chain.verify_chain()
+        logger = EdgeRecordLogger(db_path)
+        ledger_ok = logger.verify_chain()
+        logger.close()
+        print(f"Receipt chain valid: {receipts_ok}")
+        print(f"Ledger cache chain valid: {ledger_ok}")
+        return 0 if receipts_ok and ledger_ok else 1
+
     if args.work_package:
-        chain = logger.get_audit_chain(args.work_package)
-        print(json.dumps(chain, indent=2, default=str))
+        logger = EdgeRecordLogger(db_path)
+        records = logger.get_audit_chain(args.work_package)
+        logger.close()
+        print(json.dumps(records, indent=2, default=str))
     else:
         print(
-            "Provide --work-package to query, or --verify-chain to check integrity"
+            "Provide --work-package to query, --verify-chain to check integrity, "
+            "or --receipts to list the durable receipt chain"
         )
     return 0
 

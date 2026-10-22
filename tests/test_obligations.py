@@ -301,6 +301,13 @@ class TestObligationEvaluation(unittest.TestCase):
 
 
 class TestIntentHelpers(unittest.TestCase):
+    def test_plural_spellings_match(self):
+        """A goal saying "returns" must match code saying "return"."""
+        from el_verificador.obligations import _variants
+
+        self.assertIn("return", _variants("returns"))
+        self.assertIn("integers", _variants("integer"))
+
     def test_significant_terms_drop_stopwords(self):
         terms = significant_terms("Implement the user login API route for the service")
         self.assertNotIn("the", terms)

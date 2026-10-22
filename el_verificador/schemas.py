@@ -382,6 +382,10 @@ class VerificationResult(BaseModel):
     passed: bool = False
     committed: bool = False
     edge_record_payload_hash: Optional[str] = None
+    receipt_id: Optional[str] = Field(
+        default=None, description="The EdgeRecord receipt for this decision"
+    )
+    receipt_fingerprint: Optional[str] = None
     timestamp: datetime = Field(default_factory=_utcnow)
 
     @property
@@ -492,10 +496,16 @@ class VerificationAudit(BaseModel):
 
 class EdgeRecordLogger:
     """
-    Interface for writing to EdgeRecord (append-only SQLite ledger, WAL mode).
+    A queryable index over the verification record.
 
-    All verification decisions are written here for immutable audit trail.
-    Mirrors el-destilador's EdgeRecordLogger pattern.
+    The durable record is the EdgeRecord receipt chain (`receipt.py`), which is
+    append-only, file-based and verifiable by anyone holding the bytes. This
+    SQLite table is a **derived cache** over it: convenient to query, rebuilt
+    from the receipts, and never the source of truth.
+
+    It exists because the receipts are written to files and a query over a
+    year of them is slow. It is not authoritative, and `verify_chain()` on it
+    is a second opinion, not the verdict.
     """
 
     def __init__(self, db_path: str = "~/.edgerecord/ledger.sqlite"):
@@ -716,6 +726,9 @@ class VerificationConfig(BaseModel):
     # Content-addressed evidence store. A hash that points at bytes nobody
     # kept is a receipt, not a proof.
     evidence_root: str = "~/.el-verificador/evidence"
+
+    # The durable record: an append-only chain of EdgeRecord receipts.
+    receipt_dir: str = "~/.el-verificador/receipts"
 
     # Docker sandbox
     docker_image: str = "el-verificador/sandbox:local"
