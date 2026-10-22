@@ -81,6 +81,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `related_files` contract is trustworthy.
 - **CI gates for `ruff` and `mypy --strict`**, and a dedicated job for the
   golden fixture suite.
+- **Every verification decision is now recorded.** `VerifierDependencies.audit_logger`
+  defaulted to `None` and nothing ever set it, so no shipped code path wrote
+  an audit record at all. The ledger is now constructed by default, and a
+  ledger that cannot be opened is reported on stderr rather than swallowed.
+- **`el_verificador.audit` — independent verification of the audit ledger.**
+  A chain proves the records were *written* consistently, not that they still
+  *say* what they said: nothing recomputed a record's digest from the
+  record's own content, so a record edited in place still verified. The new
+  module rebuilds each audit from its stored row and recomputes the digest
+  with the same canonical function the writer used, reading the ledger
+  independently so a bug in the writer cannot hide from the check.
+- **An end-to-end verification harness** (`tests/test_end_to_end.py`). The unit
+  suite was green for four commits while the product could not complete a
+  verification. The harness runs the real CLI, as a subprocess, against a real
+  git repository, and asserts on the verdict it prints.
+- **The settled operating decision is recorded** in `ROADMAP.md` §1.5, §1.6
+  and §8.1: the least human intervention, the better. The gate is a hard
+  gate, the machine retries before it escalates, and a human is a fallback
+  rather than a step. The human-intervention budget makes that measurable.
+- **The verification-run lifecycle diagram renders.** The specification
+  targeted the Archify v1 layout while the installed renderer requires v3, so
+  it could not be rendered at all. It is now valid v3, and the PNG, the
+  interactive HTML and a delivery receipt are in `docs/archify/`.
 
 ### Changed
 
@@ -187,6 +210,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   image that could not be pulled, instead of letting the Docker SDK traceback
   escape. The test suite no longer depends on whether the host running it
   happens to have a Docker daemon.
+- **The verifier judged two commits but committed the working tree.** Those two
+  halves could not agree: if the agent's work was already committed the diff
+  described it correctly and the commit step found nothing to stage; if it was
+  left uncommitted the diff saw no change at all. The change under
+  verification is now the difference between the base commit and the working
+  tree — the state the verifier judges and the state it commits.
+- **Untracked files were invisible to the whole verification.** `git diff`
+  does not list them, so a brand new module was seen by no obligation, no
+  symbol check and no scope check. They are now part of the change set.
+- **The sandbox container exited before it could be used.** The image set
+  `ENTRYPOINT ["sleep", "infinity"]` and the runner also passes the lifecycle
+  command, so the container ran `sleep infinity sleep infinity`, rejected the
+  second argument and exited. Every check then failed against a container
+  that was no longer running, reported as a bare 409. The image uses a CMD
+  now, and the runner reports an exited container with its status and exit
+  code instead of a Docker SDK error.
+- **An HTTP method in prose was treated as a symbol to build.** A goal that
+  says "the POST /users/register endpoint" made the symbol obligation fail,
+  blocking correct work for a reason that had nothing to do with the work.
+  Protocol vocabulary is excluded from the symbol candidates.
+- **The strict type gate could not pass.** The Docker SDK ships no `py.typed`
+  and PyYAML had no stubs installed, so `mypy el_verificador` failed on seven
+  findings that had nothing to do with the logic. Both are fixed; the gate is
+  green.
 
 ### Added
 
