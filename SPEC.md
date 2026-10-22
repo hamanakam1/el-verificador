@@ -107,6 +107,22 @@ When the code passes both machine tests and the semantic intent check:
 3. Fires a cryptographically secure payload to EdgeRecord, immutably logging
    what was changed, why it was changed, and proof that it passed
 
+**The commit path stages only what was reviewed.** There is no blanket add.
+A verifier that runs `git add -A` on a shared checkout will eventually
+commit somebody's untracked secrets, their build artefacts, and another
+session's work — and the commit will look like a success. The set of paths
+to stage is therefore explicit, and the commit is refused when:
+
+- the index already holds staged work that the verification did not review;
+- the working tree's copy of a reviewed file differs from the commit the
+  verification actually inspected, because committing it would put
+  unverified bytes into a commit that carries a verification receipt.
+
+When the reviewed paths are already committed there is nothing to do, and
+the outcome is recorded as `already-committed` rather than as a commit the
+verifier made. `VerificationResult.commit_note` always says what happened,
+and the audit record carries it.
+
 ### 5. The Taskrivet Ledger Integration
 
 A Correction Prompt that is only printed for a human is not a feedback loop.
@@ -190,7 +206,7 @@ mode) at `~/.edgerecord/ledger.sqlite`:
 |---------|--------|
 | `PASS` | Commit code, teardown sandbox, log to EdgeRecord; checkpoint, finish, and accept the Taskrivet task |
 | `FAIL` | Issue Correction Prompt to Taskrivet (counts toward `max_retries`); record the failure, attach the prompt as context, and requeue the task |
-| `ESCALATE` | `max_retries` exhausted; pause container, flag ticket for human; record the final failure so the Taskrivet task is blocked for a human rather than left running |
+| `ESCALATE` | `max_retries` exhausted; pause container, flag ticket for human; record the final failure so the Taskrivet task is blocked for a human rather than left running — **with the failing checks and the semantic diff attached**, because that is the evidence the human needs |
 
 ---
 

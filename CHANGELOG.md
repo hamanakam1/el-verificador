@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The commit path staged the entire working tree.** `GitOps.commit()` ran
+  `git add -A`, so a passing verification committed the operator's untracked
+  files — reproduced on the demo repository, the resulting commit contained a
+  `.env` secrets file, an entire virtualenv, and the operator's unrelated
+  notes. The set of paths to stage is now an explicit argument and there is
+  no blanket add. The commit is refused when the index already holds staged
+  work the verification did not review, and when the working tree's copy of a
+  reviewed file differs from the commit that was actually inspected.
+  `VerificationResult.commit_note` records what happened, and the audit
+  record carries it.
+- **The escalation path discarded its evidence.** When the retry budget was
+  exhausted, the result was rebuilt with no check results and no semantic
+  diff, so the audit record for an escalation said `intent_coverage=no_diff`.
+  The last attempt's check results and semantic diff are now carried into the
+  escalating result, and the audit lists the failed checks explicitly.
 - **The semantic diff could not see a rewritten function body.** Symbols were
   compared by a tag (`"FunctionDef:name"`) that was identical at both
   revisions, so `MODIFIED` was never emitted and a changed function looked

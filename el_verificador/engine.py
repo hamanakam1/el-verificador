@@ -112,7 +112,13 @@ class ElVerificador:
                 )
                 return self._finalize(result, intent, repo_path, start)
             except RetryExhausted as exc:
-                # Escalation path: hard iteration limit reached
+                # Escalation path: hard iteration limit reached.
+                #
+                # The escalation exists to deliver the evidence a human needs
+                # to fix the ticket. The last attempt's check results and
+                # semantic diff are carried forward, so the record that
+                # reaches the human is the record of what actually failed.
+                last = loop.attempts[-1] if loop.attempts else None
                 result = VerificationResult(
                     work_package_id=intent.id,
                     repo_path=repo_path,
@@ -120,6 +126,8 @@ class ElVerificador:
                     head_commit=head_commit,
                     decision=VerificationDecision.ESCALATE,
                     attempts=loop.attempts,
+                    check_results=list(last.check_results) if last else [],
+                    semantic_diff=last.semantic_diff if last else None,
                     passed=False,
                     committed=False,
                 )
@@ -184,12 +192,25 @@ class ElVerificador:
                     f"{self.config.commit_message_prefix} "
                     f"verify {intent.id} - {intent.true_goal_summary}"
                 )
-                commit_sha = self.deps.git.commit(message, self.config.commit_branch)
-                result.committed = True
-                result.edge_record_payload_hash = commit_sha
-            except Exception:
-                # Commit failure is not a verification failure; record it
+                # Only the files the verification actually reviewed may be
+                # staged. The commit path refuses anything else; see
+                # GitOps.commit.
+                reviewed = list(result.semantic_diff.files_changed) if result.semantic_diff else []
+                outcome = self.deps.git.commit(
+                    message,
+                    self.config.commit_branch,
+                    paths=reviewed,
+                    expected_head=result.head_commit,
+                )
+                result.committed = outcome.status == "committed"
+                result.edge_record_payload_hash = outcome.sha
+                result.commit_note = f"{outcome.status}: {outcome.message}"
+            except Exception as exc:
+                # A refused commit is not a verification failure. The reason
+                # is recorded, because "nothing was committed" without a
+                # reason is not an audit trail.
                 result.committed = False
+                result.commit_note = f"not committed: {exc}"
 
         # Build the EdgeRecord audit payload (cryptographically secure)
         audit = self._build_audit(
@@ -293,6 +314,21 @@ class ElVerificador:
                 f"attempts={len(result.attempts)}",
                 f"max_retries={self.config.max_retries}",
                 "escalation=true",
+                # The evidence the escalation exists to deliver.
+                f"checks_passed={all(c.passed for c in result.check_results)}"
+                if result.check_results
+                else "no_check_results",
+                "failed_checks="
+                + ",".join(
+                    f"{c.kind.value}:{c.command}"
+                    for c in result.check_results
+                    if not c.passed
+                )
+                if any(not c.passed for c in result.check_results)
+                else "no_failed_checks",
+                f"intent_coverage={result.semantic_diff.intent_coverage:.2f}"
+                if result.semantic_diff
+                else "no_diff",
             ]
         else:
             rationale = (
@@ -307,6 +343,8 @@ class ElVerificador:
                 f"attempts={len(result.attempts)}",
             ]
         key_evidence.extend(self._coverage_evidence(result.semantic_diff))
+        if result.commit_note:
+            key_evidence.append(f"commit={result.commit_note}")
 
         audit = VerificationAudit(
             work_package_id=intent.id,
