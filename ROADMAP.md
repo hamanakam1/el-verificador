@@ -1250,5 +1250,61 @@ deliver.
 
 **Still open, unchanged:** the host-execution fallback in dry-run (§2.3.1), the
 missing sandbox image (§2.3.2), the retry loop re-running the same checks
-without a no-progress detector, the audit hash not covering its own evidence
-(§2.3.5), and the audit trail not being written to the real EdgeRecord (§2.2).
+without a no-progress detector, the audit trail not being written to the real
+EdgeRecord (§2.2).
+
+---
+
+## Appendix F — Defects confirmed and fixed in the audit trail
+
+**F.1 — The content hash did not cover the evidence (§2.3.5)**
+
+`VerificationAudit.compute_hash()` hashed
+`work_package_id + decision + rationale + passed + committed + timestamp`. It
+did not cover `key_evidence`, `attempts`, `repo_path`, the check results, or
+the diff. The "content hash" attested to a sentence, not to the decision the
+sentence described. Editing the evidence in a stored record left the hash
+intact.
+
+*Fix:* the hash covers the whole decision, serialised as canonical JSON with
+recursively sorted keys and compact separators, hashed with SHA-256. The
+covered fields are the work package, the repository, the decision, the
+rationale, the key evidence, the attempt count, the timing, and the
+timestamp.
+
+**F.2 — Two definitions of the same hash (§2.3.5)**
+
+`EdgeRecordLogger.log_decision()` recomputed the hash with a second copy of
+the formula and **overwrote** the value the model's validator had computed.
+Two definitions, kept in sync by hand.
+
+*Fix:* one definition, in `el_verificador/canonical.py`. The model computes
+the digest, the writer stores it, and the verifier recomputes it from the
+same canonical form. A test asserts that the model and the writer agree.
+
+**F.3 — The chain verified links but not contents (§2.3.5)**
+
+`verify_chain()` compared `previous_audit_hash` against the previous
+`content_hash` and stopped there. A removed record broke the chain; an
+*edited* record did not.
+
+*Fix:* `verify_chain()` now re-hashes every record from its stored columns
+and compares it with the stored digest, so a record edited after the fact is
+detected and named. `chain_status()` returns the reason, and the CLI prints
+it.
+
+**F.4 — The chain was ordered by timestamp (§2.3.5)**
+
+Records were ordered by `timestamp`, so two decisions written in the same
+millisecond could be verified in an order that was not the order they were
+written in.
+
+*Fix:* the chain follows insertion order, and a test covers two records with
+the same timestamp.
+
+**Still open, unchanged:** the host-execution fallback in dry-run (§2.3.1), the
+missing sandbox image (§2.3.2), the retry loop re-running the same checks
+without a no-progress detector, and the audit trail still being written to a
+SQLite table this repository invented rather than to the real EdgeRecord
+(§2.2). The local ledger is the tool's own; it is not yet the system of
+record.
