@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "El Verificador — Verification Run Lifecycle",
+    "output": "docs/archify/verification-run.lifecycle.html",
+    "viewBox": [
+      1060,
+      632
+    ],
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-path",
+        "label": "Main verification path",
+        "focus": [
+          "received",
+          "sandbox",
+          "checks",
+          "sealed",
+          "align",
+          "committed"
+        ],
+        "note": "Follow one work package from intake to a committed, receipted result."
+      },
+      {
+        "id": "correction-loop",
+        "label": "Bounded correction loop",
+        "focus": [
+          "align",
+          "correction",
+          "guard",
+          "checks",
+          "escalated"
+        ],
+        "note": "See how a failure routes back for a fix and when the loop stops early."
+      },
+      {
+        "id": "evidence-boundary",
+        "label": "Evidence boundary",
+        "focus": [
+          "checks",
+          "sealed",
+          "align",
+          "committed"
+        ],
+        "note": "The decision is a pure function of sealed, content-addressed evidence."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Verification run"
+    },
+    {
+      "id": "retry",
+      "label": "Guardrailed correction loop"
+    },
+    {
+      "id": "terminal",
+      "label": "Terminal outcomes"
+    }
+  ],
+  "states": [
+    {
+      "id": "received",
+      "type": "start",
+      "label": "Work Package",
+      "sublabel": "acceptance plan received",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "tag": "intake"
+    },
+    {
+      "id": "sandbox",
+      "type": "active",
+      "label": "Sandbox Ready",
+      "sublabel": "pinned image, offline",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "tag": "isolate"
+    },
+    {
+      "id": "checks",
+      "type": "active",
+      "label": "Acceptance Checks",
+      "sublabel": "contract commands run",
+      "lane": "main",
+      "col": 2,
+      "step": "03",
+      "tag": "run"
+    },
+    {
+      "id": "sealed",
+      "type": "active",
+      "label": "Evidence Sealed",
+      "sublabel": "content-addressed, frozen",
+      "lane": "main",
+      "col": 3,
+      "step": "04",
+      "tag": "freeze"
+    },
+    {
+      "id": "align",
+      "type": "decision",
+      "label": "Obligation Gate",
+      "sublabel": "deterministic decide()",
+      "lane": "main",
+      "col": 4,
+      "step": "05",
+      "tag": "gate"
+    },
+    {
+      "id": "correction",
+      "type": "waiting",
+      "label": "Correction Issued",
+      "sublabel": "violated obligations named",
+      "lane": "retry",
+      "col": 1,
+      "tag": "bounded"
+    },
+    {
+      "id": "guard",
+      "type": "failure",
+      "label": "No-Progress Guard",
+      "sublabel": "attempts spent or unchanged",
+      "lane": "retry",
+      "col": 0,
+      "yOffset": 74,
+      "tag": "fail-fast"
+    },
+    {
+      "id": "committed",
+      "type": "success",
+      "label": "Committed",
+      "sublabel": "verified branch, receipt",
+      "lane": "terminal",
+      "col": 2,
+      "tag": "pass"
+    },
+    {
+      "id": "escalated",
+      "type": "failure",
+      "label": "Escalated",
+      "sublabel": "flagged for human review",
+      "lane": "terminal",
+      "col": 0,
+      "tag": "human"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t-align-committed",
+      "from": "align",
+      "to": "committed",
+      "label": "every obligation satisfied",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "drop",
+      "labelAt": [
+        830,
+        330
+      ]
+    },
+    {
+      "id": "t-align-correction",
+      "from": "align",
+      "to": "correction",
+      "label": "obligation violated or unproven",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        560,
+        205
+      ]
+    },
+    {
+      "id": "t-correction-checks",
+      "from": "correction",
+      "to": "checks",
+      "label": "agent applied the fix",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "t-correction-guard",
+      "from": "correction",
+      "to": "guard",
+      "label": "retries exhausted",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        430,
+        300
+      ]
+    },
+    {
+      "id": "t-guard-escalated",
+      "from": "guard",
+      "to": "escalated",
+      "label": "escalate now",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        402,
+        432
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Main Path",
+      "items": [
+        "Sandbox proven before code runs",
+        "Evidence sealed before decision"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Bounded Correction",
+      "items": [
+        "Prompt names failed obligations",
+        "Model proposes; evaluator decides"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Fail-Safe Exits",
+      "items": [
+        "No-progress retries escalate",
+        "No decision without evidence"
+      ]
+    }
+  ]
+}
