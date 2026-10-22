@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Acceptance checks fell back to running on the host.** When Docker was
+  unavailable or `dry_run` was set, the checks ran with `subprocess.run` in
+  the repository under test — code the agent wrote, with the operator's
+  credentials, in the operator's working tree, with the operator's network. A
+  `conftest.py` is arbitrary code, and pytest imports it before the tests
+  run. The host fallback is now opt-in (`allow_host_execution`, or
+  `--allow-host-execution`); without it the check is refused with exit code
+  `125` and an explanation, and the verification fails closed.
 - **The retry loop spent its whole budget on an unchanged repository.** After
   a failed attempt the loop handed the Correction Prompt back and re-ran the
   same checks, with nothing checking whether the agent had acted on it. An

@@ -41,6 +41,18 @@ the acceptance pipeline inside it:
 Only a container exit code of `0` for every check counts. Taskrivet's
 self-reported status is never trusted.
 
+**When there is no sandbox, the checks are not run on the host.** The
+repository under test contains code the agent wrote, and running its test
+suite on the operator's machine executes that code with the operator's
+credentials, in the operator's working tree, with the operator's network. A
+`conftest.py` is arbitrary code, and pytest imports it before the tests run.
+
+So the host fallback is **opt-in**: `allow_host_execution` in the
+configuration, or `--allow-host-execution` on the command line. Without it,
+the check is refused with exit code `125` — the conventional "could not be
+executed", distinct from a test failure — and the message says what to do
+about it. The verification fails closed.
+
 ### 2. Intent Alignment (The Semantic Diff)
 
 Passing tests are not enough — the code must solve the user's original problem.
@@ -208,7 +220,8 @@ mode) at `~/.edgerecord/ledger.sqlite`:
 | `max_retries` | 3 (hard iteration limit) |
 | Intent coverage threshold | 0.85 — reported with its inputs; a gate once the score is calibrated (see §2) |
 | Fail on TODO stubs | enabled — honours `fail_on_todo_stubs`; a stub or a TODO comment fails the run |
-| Dry-run mode | available for offline development |
+| Host execution | refused unless `allow_host_execution` is set — the checks run in the sandbox, or not at all |
+| Dry-run mode | available for offline development; it does not authorise host execution |
 | Local-first | no cloud dependencies; Ollama Qwen at `http://127.0.0.1:11434` |
 
 ---

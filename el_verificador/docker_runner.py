@@ -15,6 +15,11 @@ from typing import List, Optional
 
 from .schemas import CheckKind, CheckResult, VerificationConfig
 
+# Exit code for "the check could not be executed". 125 is the conventional
+# value for a command that cannot be run, and it is distinct from a test
+# failure, so the two are never confused in a report.
+HOST_EXECUTION_REFUSED = 125
+
 
 class SandboxUnavailableError(RuntimeError):
     """Raised when the Docker sandbox cannot be provisioned.
@@ -123,7 +128,21 @@ class DockerRunner:
         start = time.time()
 
         if self.config.dry_run or not self._docker_available():
-            # Dry-run: execute locally for offline development.
+            # No sandbox. The fallback would run the command on the host, in
+            # the repository under test, with the operator's credentials.
+            # That repository holds code the agent wrote, and a `conftest.py`
+            # is arbitrary code — so the fallback is opt-in, and the refusal
+            # says exactly what to do about it.
+            if not self.config.allow_host_execution:
+                return CheckResult(
+                    kind=kind,
+                    command=command,
+                    exit_code=HOST_EXECUTION_REFUSED,
+                    stdout="",
+                    stderr=self._host_execution_refusal(),
+                    duration_ms=int((time.time() - start) * 1000),
+                )
+
             import shlex
             import subprocess
 
@@ -209,6 +228,20 @@ class DockerRunner:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+    def _host_execution_refusal(self) -> str:
+        """Why the check did not run, and what the operator can do about it."""
+        reason = (
+            "dry-run mode" if self.config.dry_run else "the Docker daemon is not available"
+        )
+        return (
+            f"the check was not run: {reason}, and running acceptance commands on "
+            "the host would execute code that came from the repository under "
+            "test with the operator's credentials. Start the Docker daemon to "
+            "run this check in the sandbox, or pass --allow-host-execution (or "
+            "set allow_host_execution: true) if you trust this repository and "
+            "accept that its test code will run on your machine."
+        )
+
     def _docker_available(self) -> bool:
         if self._docker_ok is not None:
             return self._docker_ok

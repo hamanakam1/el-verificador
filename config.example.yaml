@@ -36,3 +36,10 @@ commit_message_prefix: "feat(el-verificador):"
 
 # Dry-run: skip Docker/git/EdgeRecord writes for offline testing
 dry_run: false
+
+# Running the acceptance commands on the host executes code that came from the
+# repository under test — a `conftest.py` is arbitrary code — with your
+# credentials, in your working tree. It is refused unless you allow it here
+# or pass --allow-host-execution on the command line. Start the Docker daemon
+# to run checks in the sandbox instead.
+allow_host_execution: false
