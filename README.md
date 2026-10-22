@@ -163,8 +163,8 @@ of *what was decided and why* cannot be quietly rewritten:
 
 **Alpha — the core loop runs, the judgement is real, the pipeline is not yet connected.**
 
-190 tests green, `ruff` clean, `mypy --strict` clean, and all three gates now
-run in CI. The verification cycle runs end-to-end against real git
+223 tests green, `ruff` clean, `mypy --strict` clean, and every gate now
+runs in CI. The verification cycle runs end-to-end against real git
 repositories, and a CI job runs the acceptance checks inside a real container.
 
 **What works today**
@@ -186,6 +186,9 @@ repositories, and a CI job runs the acceptance checks inside a real container.
 - Ticket Board flagging on escalation, additive and never attributed to the
   operator
 - An MCP surface, so an agent asks the verifier instead of reimplementing checks
+- Every decision recorded in the ledger, and an independent verifier for that
+  ledger: a record edited after it was written is detected, because each
+  record's digest is recomputed from the record's own content
 
 **The regression harness is a golden fixture suite.** Eight synthetic
 repositories with known verdicts, verified end to end through real git:
@@ -205,6 +208,9 @@ repositories with known verdicts, verified end to end through real git:
 
 - The sandbox image is tag-pinned, not digest-pinned. A release must resolve
   and record the digest.
+- The ledger is this component's own chain. The receipts conform to the
+  cross-component contract, but the ledger itself is still a local SQLite
+  file rather than the canonical EdgeRecord record.
 - `scope_respected` defaults to `warn`, not `enforce`: a file outside the work
   package's `related_files` is reported and audited, but does not yet block a
   pass. Set `scope_mode: "enforce"` once the `related_files` contract is
