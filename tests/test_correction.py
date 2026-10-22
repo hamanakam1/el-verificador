@@ -309,6 +309,19 @@ class TestCorrectionLoop(unittest.TestCase):
         self.assertIn("Attempt 2 of 3", rendered)
         self.assertIn("Remaining retries: 1", rendered)
 
+    def test_the_prompt_forbids_adjusting_the_gate(self):
+        """The agent must not be invited to edit the check that judged it."""
+        prompt = CorrectionPrompt(
+            attempt=1,
+            max_retries=3,
+            remaining_attempts=2,
+            task_goal="Implement the login route",
+            task_goal_summary="login route",
+        )
+        rendered = prompt.render()
+        self.assertIn("not yours", rendered)
+        self.assertIn("check fixture", rendered)
+
     def test_a_skipped_check_is_marked_as_not_run(self):
         prompt = CorrectionPrompt(
             attempt=1,

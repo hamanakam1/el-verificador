@@ -21,8 +21,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from el_verificador.acceptance import resolve_acceptance
 from el_verificador.engine import ElVerificador
-from el_verificador.schemas import VerificationConfig, VerificationDecision
+from el_verificador.schemas import (
+    IntentPackage,
+    VerificationConfig,
+    VerificationDecision,
+)
 from tests.support import TempStore
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "golden"
@@ -74,12 +79,23 @@ def _build_repo(tmp: Path, case: Path) -> tuple:
     return repo, base, head
 
 
-def _check_fixture(config: VerificationConfig, case: Path, tmp: Path) -> str:
-    """Recorded acceptance results for this fixture."""
+def _check_fixture(
+    config: VerificationConfig, case: Path, tmp: Path, work_package: dict
+) -> str:
+    """Recorded acceptance results for this fixture.
+
+    The commands recorded are the ones the verifier will actually run, which
+    for a work package that carries its own acceptance contract are not the
+    configured defaults.
+    """
     expected = json.loads((case / "expected.json").read_text())
     overrides = expected.get("checks", {})
+
+    intent = IntentPackage.from_dict(work_package)
+    contract = resolve_acceptance(intent, config)
+
     checks = []
-    for command in config.test_commands:
+    for command in contract.commands:
         record = overrides.get(command, {})
         checks.append(
             {
@@ -112,7 +128,9 @@ class TestGoldenFixtures(unittest.TestCase):
                 dry_run=True,
                 scope_mode=expected.get("scope_mode", "enforce"),
             )
-            config.check_fixture = _check_fixture(config, case, tmp)
+            config.check_fixture = _check_fixture(
+                config, case, tmp, work_package
+            )
 
             import asyncio
 
@@ -172,6 +190,24 @@ class TestGoldenFixtures(unittest.TestCase):
         result, _ = self._run_case("broken_build")
         self.assertEqual(result.decision, VerificationDecision.FAIL)
         self.assertTrue(result.evidence_hashes, "a failure must cite evidence too")
+
+    def test_the_work_packages_own_acceptance_contract_is_run(self):
+        """A work package's command is run, not the configured default."""
+        result, _ = self._run_case("contract_honoured")
+        commands = [
+            o["statement"]
+            for o in result.obligations
+            if o["id"].startswith("acceptance_command")
+        ]
+        self.assertTrue(commands)
+        self.assertTrue(
+            any("npm test" in statement for statement in commands),
+            commands,
+        )
+        self.assertFalse(
+            any("pytest -q" in statement for statement in commands),
+            "the configured default ran instead of the work package's contract",
+        )
 
     def test_empty_diff_is_not_a_pass(self):
         result, _ = self._run_case("empty_diff")

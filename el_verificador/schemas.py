@@ -341,6 +341,12 @@ class CorrectionPrompt(BaseModel):
             "Do not add new TODO stubs, and do not weaken or delete tests. "
             "Every change must map to the task goal."
         )
+        lines.append(
+            "Change the code under test only. The configuration, the check "
+            "fixture, the acceptance commands and the thresholds are not yours "
+            "to adjust, and a check that did not run is not a failure to work "
+            "around."
+        )
         return "\n".join(lines)
 
 

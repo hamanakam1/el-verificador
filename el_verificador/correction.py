@@ -43,10 +43,18 @@ were not satisfied, the failed acceptance checks with their exit codes and the
 tail of their output, and the semantic diff against the original intent.
 
 Write a short, precise analysis for the agent that has to fix this. State what
-broke, in what order it matters, and what a correct fix looks like. Do not
-invent evidence that is not given to you. Do not suggest writing TODO stubs
-and do not suggest weakening or deleting tests. Every change must map back to
-the task goal.
+broke, in what order it matters, and what a correct fix looks like.
+
+Rules:
+
+- Do not invent evidence that is not given to you.
+- Do not suggest writing TODO stubs, and do not suggest weakening, skipping or
+  deleting tests.
+- Do not suggest changing the verification environment: the configuration, the
+  check fixture, the acceptance commands, the thresholds, or the verifier
+  itself. If a check did not run, say so and tell the agent to fix the code;
+  the gate is not the agent's to adjust.
+- Every change must map back to the task goal.
 
 Return only the analysis text: no markdown fences, no preamble, no sign-off."""
 
@@ -188,10 +196,16 @@ class CorrectionLoop:
         test_output = ""
 
         for check in failed_checks:
-            if not check.passed:
-                if check.stderr:
-                    stack_traces.append(check.stderr)
-                test_output += check.failure_summary + "\n"
+            if check.passed:
+                # A check that passed is not a failure and does not belong in
+                # the prompt's failure section.
+                continue
+            if check.stderr and "Traceback (most recent call last)" in check.stderr:
+                stack_traces.append(check.stderr)
+            test_output += check.failure_summary + "\n"
+
+        # The prompt names what failed, not what happened.
+        failed_checks = [check for check in failed_checks if not check.passed]
 
         narrative: Optional[str] = None
         try:

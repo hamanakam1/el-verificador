@@ -1,0 +1,12 @@
+{
+  "decision": "fail",
+  "violations": [
+    "acceptance_command_0"
+  ],
+  "checks": {
+    "npm test": {
+      "exit_code": 1,
+      "stderr": "npm ERR! Test failed."
+    }
+  }
+}
