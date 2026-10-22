@@ -142,12 +142,131 @@ executes the final logistical steps:
   underneath the operator, and a commit that reaches outside the verified
   change set fails loudly rather than being recorded as a success.
 - **Tears down the Docker container** and releases compute resources.
-- **Writes an audit record** whose content hash covers the decision, the
-  evidence hashes and the resolved obligations, chained to the previous record.
+- **Writes a receipt** to the durable record, chained to the previous one.
 
 **Not yet:** the commit goes to the current branch rather than to a dedicated
-verified branch, and the audit record is written to a local SQLite ledger
-rather than to a canonical EdgeRecord receipt (see below).
+verified branch.
+
+---
+
+## The Acceptance Contract — `IMPLEMENTED`
+
+The commands that must succeed are resolved once per run, and the resolution
+records where they came from:
+
+| Source | When |
+|---|---|
+| `work_package` | The work package carries an explicit `acceptance_commands` list |
+| `criteria` | The work package carries `acceptance_criteria` from which commands can be parsed |
+| `config` | Neither: the configured default is used |
+
+Only two shapes are parsed out of free-text criteria — a fenced code block,
+and a bare line that starts with a known tool. Anything else yields nothing
+and the configured default is used, because guessing would mean running
+commands the ticket never asked for.
+
+---
+
+## Evidence — `IMPLEMENTED`
+
+**Every decision cites at least one content hash, and the bytes are kept.**
+
+Evidence is written to a content-addressed store
+(`~/.el-verificador/evidence/`). The path *is* the hash, so identical bytes
+land in the same place rather than accumulating copies, and nothing is ever
+overwritten. Every artifact can be re-hashed to prove it is what the decision
+was made from.
+
+Sealed per run: the acceptance command output, the per-check result, the
+semantic diff summary, the resolved obligations, and the sandbox metadata
+(image, resource caps, network state, acceptance commands and their source).
+
+---
+
+## The Durable Record — `IMPLEMENTED`
+
+Every decision is written as an **EdgeRecord receipt**: a JSON file, chained to
+the previous one, with a canonical fingerprint.
+
+The receipts conform to two contracts at once:
+
+- `factory-contracts/schemas/receipt.v1.json` — `receipt_id`, `kind`,
+  `created_at`, `ticket`, `actor`, `outcome`, `artifacts`, `notes`.
+- The EdgeRecord receipt shape and its canonical hashing rule, so the receipts
+  can be checked with the same tooling that checks the operator's own cycle
+  journal. The canonical bytes are byte-for-byte identical to EdgeRecord's
+  `bin/era-fingerprint.py`, including the non-ASCII case that broke
+  ERA-000314.
+
+The chain is ordered by a monotonic `seq`, not by `created_at`: the timestamp
+has second resolution, and a verifier that writes several receipts in the
+same second would otherwise be ordered by a random receipt id.
+
+**The local SQLite ledger is a derived query cache over the receipts.** It is
+convenient to query and rebuilt from them. It is not the source of truth, and
+`verify_chain()` on it is a second opinion rather than the verdict.
+
+---
+
+## Ticket Board Flagging — `PARTIAL`
+
+On escalation, the ticket is flagged for a human through the dashboard's HTTP
+API.
+
+**The write is additive.** The ticket's existing tags survive, and its notes
+are read and preserved rather than replaced. The ticket's `status` and
+`priority` are never touched, because a status change can imply that work
+may proceed.
+
+**The write is never attributed to the operator.** The dashboard's
+`/api/tix/update` route hardcodes `actor="operator"`, and the dashboard's own
+code carries a warning about an untagged coordination post landing on a ticket
+as `sender="Mike", role="human"` — data nobody owned. This component uses the
+workboard route and names itself in the note.
+
+**It is off by default** (`ticket_board_enabled: false`). Writing to somebody
+else's board is the operator's decision, and it is one config line. The
+delivery outcome is recorded in the receipt, so an escalation that could not
+be delivered is visibly different from one that was.
+
+**Not yet:** the ticket is the work package's `ticket` field. The board's own
+`acceptance` field is not yet the source of the acceptance contract.
+
+---
+
+## The MCP Surface — `IMPLEMENTED`
+
+The verifier is also an MCP server over stdio, so an agent can ask it rather
+than reimplementing checks.
+
+| Tool | What it does |
+|---|---|
+| `verify_work_package` | Verify a work package and return the verdict, the obligations and the evidence hashes |
+| `verification_status` | The last recorded verdict for a work package |
+| `verification_evidence` | The evidence artifacts behind a receipt |
+| `verify_receipt_chain` | Check the integrity of the verification record |
+
+This is what keeps the checker from being the author: Taskrivet wrote the
+code, and the tool that judges it runs in another process with another
+context.
+
+---
+
+## The Sandbox — `IMPLEMENTED`
+
+`docker/verification/Dockerfile` builds the image the acceptance checks run
+inside:
+
+- The acceptance toolchain is baked in, so the runtime container needs no
+  network
+- A non-root uid
+- Resource caps — memory, CPU and PIDs — that are part of the isolation
+  contract rather than a convenience
+- The network is off by default; a test that genuinely needs one must say so
+  explicitly, and the exception is recorded in the receipt
+
+**Not yet:** the base image is tag-pinned. A release must resolve and record
+the digest.
 
 ---
 
@@ -161,47 +280,13 @@ All contracts are pydantic v2 models (`extra="forbid"`):
 | `CheckResult` | Result of one acceptance check (exit code, stdout, stderr, execution source) |
 | `SemanticDiff` | AST/git diff vs. distilled intent |
 | `Obligation` | One checkable claim and its resolution |
+| `AcceptanceContract` | The commands that must succeed, and where they came from |
+| `EvidenceArtifact` | One stored artifact, addressed by the hash of its bytes |
 | `CorrectionPrompt` | Bounded prompt handed back to Taskrivet on failure |
 | `VerificationResult` | Complete result of one verification run |
 | `VerificationAudit` | Immutable audit record (SHA256 hash + hash chain) |
 
 ---
-
-## Evidence
-
-**Every decision cites at least one content hash.** A decision with no evidence
-is not a decision.
-
-The hash of each check's output binds the record to the bytes that were
-actually produced, so a later reader can prove the verdict was made from that
-evidence and not from something else. The audit record's own content hash
-covers the decision, the rationale, the evidence hashes and the obligation
-outcomes — not just a sentence of prose.
-
-**Not yet:** a content-addressed artifact store. Evidence hashes are recorded
-and verifiable, but the artifacts themselves are not retained in a store; see
-ROADMAP.md §3.5.
-
----
-
-## EdgeRecord Audit — `PARTIAL`
-
-Every verification decision is written to a local append-only SQLite ledger
-(WAL mode) at `~/.edgerecord/ledger.sqlite`:
-
-- Content hash = SHA256 over the canonical decision body
-- `previous_audit_hash` chains records for tamper evidence
-- A monotonic `seq` column orders the chain, and the predecessor is selected
-  and the row inserted inside one immediate transaction, so concurrent writers
-  cannot fork the chain
-- `verify_chain()` validates the full hash chain
-
-**Not yet:** this is not the EdgeRecord receipt format. The real EdgeRecord is
-git-tracked JSON receipts in `receipts/`, fingerprinted by recursively
-key-sorted, compact-separator JSON with `ensure_ascii=False`, chained by
-`previous_fingerprint`, and verified by `playbooks/verify-chain.py`. Conformance
-is specified in ROADMAP.md §4, Phase 4. The local ledger is a query cache over
-receipts, not a competing source of truth.
 
 ---
 
@@ -219,6 +304,9 @@ receipts, not a competing source of truth.
 | Scope mode | `warn` / `enforce` / `off` | `IMPLEMENTED`, defaulting to `warn` |
 | Local inference | Ollama at `http://127.0.0.1:11434` | `IMPLEMENTED` — the model never decides |
 | Dry-run | no writes and no execution | `IMPLEMENTED` |
+| Evidence retention | the bytes a decision rests on are kept and re-hashable | `IMPLEMENTED` |
+| Receipt canonicality | byte-identical to EdgeRecord's own fingerprint tool | `IMPLEMENTED` |
+| Ticket Board write | additive, never a status change, never attributed to the operator | `IMPLEMENTED`, off by default |
 
 ---
 
@@ -228,7 +316,7 @@ receipts, not a competing source of truth.
 |---------|--------|--------|
 | `PASS` | Commit the verified files, tear down the sandbox, write the audit record | `IMPLEMENTED` |
 | `FAIL` | Issue a Correction Prompt to Taskrivet (counts toward `max_retries`) | `IMPLEMENTED` |
-| `ESCALATE` | `max_retries` exhausted, or the worktree did not change; escalate to a human with full context | `PARTIAL` — the escalation is a return value, not a ticket |
+| `ESCALATE` | `max_retries` exhausted, or the worktree did not change; escalate to a human with full context | `IMPLEMENTED` — the ticket is flagged, and the flag's delivery is recorded |
 | `INCONCLUSIVE` | No verdict was reached; nothing ran | `IMPLEMENTED` |
 
 ---
@@ -237,8 +325,14 @@ receipts, not a competing source of truth.
 
 ```
 python -m el_verificador verify  --work-package wp.json --repo . --base HEAD~1 --head HEAD [--dry-run] [--check-fixture checks.json]
-python -m el_verificador audit   --work-package dwp-abc --verify-chain
+python -m el_verificador audit   --work-package dwp-abc --verify-chain | --receipts
 python -m el_verificador config  --init | --show
+```
+
+The MCP server is a separate entry point:
+
+```
+el-verificador-mcp            # stdio transport
 ```
 
 Exit codes: `0` pass, `1` fail or escalate, `2` inconclusive.

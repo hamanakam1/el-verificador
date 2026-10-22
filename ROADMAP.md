@@ -85,6 +85,17 @@ is now enforced with a worker thread, and an overrun is reported as exit `124`.
 | The retry loop burned its budget on no-ops | **New.** A working-tree fingerprint ends the loop when the agent changed nothing. |
 | An inconclusive run was retried | **New.** When nothing ran there is nothing to fix. |
 
+### Landed: the durable record and the escalation
+
+| Defect | Resolution |
+|---|---|
+| The audit record was an invented SQLite table, not EdgeRecord | **Fixed.** `receipt.py` emits receipts conforming to `factory-contracts/schemas/receipt.v1.json` and to the EdgeRecord receipt shape, with the canonical hashing from `RUN_ERA.md`. The canonical bytes are byte-for-byte identical to EdgeRecord's own `bin/era-fingerprint.py`, including the non-ASCII case that broke ERA-000314 — a test runs the reference tool against a receipt this module produced and asserts they agree. The SQLite table is now documented as a derived query cache over the receipts, and `audit --verify-chain` checks both. |
+| A hash that pointed at bytes nobody kept | **Fixed.** `evidence.py` is a content-addressed store: identical bytes land in the same place, nothing is overwritten, and every artifact can be re-hashed to prove it is what the decision was made from. The audit carries the artifacts and its hash covers them. |
+| `ESCALATE` was a return value, not an escalation | **Fixed.** `ticket_board.py` flags the ticket through the dashboard's HTTP API. The write is additive (existing tags and notes survive), never changes the status, and is never attributed to the operator — the dashboard's `/api/tix/update` route hardcodes `actor="operator"`, and its own code carries a warning about an untagged post landing on a ticket as `sender="Mike", role="human"`. It is **off by default**: writing to somebody else's board is the operator's call, and it is one config line. The delivery outcome is recorded in the receipt. |
+| The acceptance command list was hardcoded | **Fixed.** The contract is carried by the work package — an explicit command list, or commands parsed out of its acceptance criteria — with the configured default as the fallback. The resolution records which source it was used. |
+| The `taskrivet/sandbox:latest` image did not exist | **Fixed.** `docker/verification/Dockerfile` builds it: the acceptance toolchain baked in so the runtime container needs no network, a non-root uid, and resource caps (memory, CPU, PIDs) that are part of the isolation contract. A CI job builds it and runs the acceptance checks inside it. |
+| The verifier was an island nothing could call | **Fixed.** `mcp_server.py` serves `verify_work_package`, `verification_status`, `verification_evidence` and `verify_receipt_chain` over stdio. An agent asks the verifier instead of reimplementing checks — which is what keeps the checker from being the author. |
+
 ### Landed: the regression harness
 
 The diff engine — the module that answers the component's central question —
@@ -109,14 +120,13 @@ green through four commits.
 
 | Item | Phase |
 |---|---|
-| The `taskrivet/sandbox:latest` image does not exist and no component provisions it | 1 |
-| Resource limits (CPU, memory, PID) are not enforced, only the wall clock | 1 |
-| The acceptance command list is still the configured default, not the ticket's contract | 1 |
+| The sandbox image is tag-pinned, not digest-pinned. A release must resolve and record the digest. | 1 |
+| The acceptance contract is resolved from the work package, but the ticket's own `acceptance` field is not yet the source of truth | 1, 3 |
 | `scope_respected` defaults to `warn`, not `enforce` | 2 |
-| The verdict is not yet written to a canonical EdgeRecord receipt | 4 |
-| Ticket Board escalation is a return value, not a write | 3 |
-| The diff engine is Python-only (`ast`, not tree-sitter) | 2, 5 |
-| No content-addressed artifact store; evidence hashes are recorded but the bytes are not retained | 2 |
+| The verdict is not yet written to the *operator's* EdgeRecord cycle journal. The receipts are this component's own chain, in the cross-component contract, and do not interleave with the operator's cycles. | 4 |
+| The diff engine is Python-only (`ast`, not tree-sitter). Python is 8,228 files across the factory against 875 for JavaScript and TypeScript, so this is a Phase 5 concern rather than a blocker. | 2, 5 |
+| `goal_terms` is lexical, not semantic. A deeper check needs the acceptance contract's explicit behaviours. | 2 |
+| No metrics yet: pass rate, escalation rate by category, false-positive rate | 5 |
 
 ---
 

@@ -149,19 +149,29 @@ of *what was decided and why* cannot be quietly rewritten:
 
 **Alpha — the core loop runs, the judgement is real, the pipeline is not yet connected.**
 
-133 tests green, `ruff` clean, `mypy --strict` clean, and both gates now run in
-CI. The verification cycle runs end-to-end against real git repositories.
+190 tests green, `ruff` clean, `mypy --strict` clean, and all three gates now
+run in CI. The verification cycle runs end-to-end against real git
+repositories, and a CI job runs the acceptance checks inside a real container.
 
 **What works today**
 
-- Independent acceptance testing inside the container, with per-check timeouts
+- Independent acceptance testing inside the container, under a wall-clock limit
+  and memory, CPU and PID caps
+- The acceptance contract comes from the work package — its own command list,
+  or commands parsed out of its acceptance criteria
 - Intent alignment through obligations, resolved deterministically
 - An AST diff that sees rewritten function bodies, finds structural stubs, and
   detects weakened tests
 - A bounded correction loop with a no-progress guard, whose prompt names the
   violated obligations
 - A commit scoped to the verified change set
-- A content-hashed, chained audit record whose hash covers the evidence
+- A content-addressed evidence store, so the bytes a decision rests on are
+  kept and can be re-hashed
+- An EdgeRecord receipt chain — the durable record, verifiable with EdgeRecord's
+  own tooling
+- Ticket Board flagging on escalation, additive and never attributed to the
+  operator
+- An MCP surface, so an agent asks the verifier instead of reimplementing checks
 
 **The regression harness is a golden fixture suite.** Eight synthetic
 repositories with known verdicts, verified end to end through real git:
@@ -179,18 +189,20 @@ repositories with known verdicts, verified end to end through real git:
 
 **Known gaps, all tracked in [ROADMAP.md](ROADMAP.md):**
 
-- The `taskrivet/sandbox:latest` image still does not exist, and no component
-  provisions it. The sandbox image is the next thing to build.
-- The audit record is written to a local SQLite ledger
-  (`~/.edgerecord/ledger.sqlite`), not to a canonical EdgeRecord receipt. The
-  receipt contract and its canonical hashing are specified in the roadmap.
+- The sandbox image is tag-pinned, not digest-pinned. A release must resolve
+  and record the digest.
 - `scope_respected` defaults to `warn`, not `enforce`: a file outside the work
   package's `related_files` is reported and audited, but does not yet block a
   pass. Set `scope_mode: "enforce"` once the `related_files` contract is
   trustworthy.
-- Ticket Board escalation is not wired up. `ESCALATE` is a return value.
-- Multi-language support is Python-only. The diff engine is written against
-  Python's `ast`; the roadmap specifies tree-sitter.
+- The receipts are this component's own chain, in the cross-component contract.
+  They do not interleave with the operator's EdgeRecord cycle journal.
+- The diff engine is Python-only. Python is 8,228 files across the factory
+  against 875 for JavaScript and TypeScript, so this is a later concern.
+- Ticket Board flagging is off by default (`ticket_board_enabled: false`).
+  It writes to somebody else's board, and that is the operator's call.
+- There are no metrics yet: pass rate, escalation rate by category, and
+  false-positive rate are all unmeasured.
 
 ## What El Verificador gates
 
@@ -218,11 +230,14 @@ Screenshot provenance is recorded in
 ## Quick Start
 
 ```bash
-# 1. Create config (read automatically from ~/.el-verificador/config.yaml)
+# 1. Build the verification sandbox image
+./scripts/build_sandbox_image.sh
+
+# 2. Create config (read automatically from ~/.el-verificador/config.yaml)
 python -m el_verificador config --init
 python -m el_verificador config --show
 
-# 2. Verify a DistilledWorkPackage
+# 3. Verify a DistilledWorkPackage
 #
 #    --dry-run writes nothing AND executes nothing. The acceptance commands
 #    are not run on your machine; the verdict is INCONCLUSIVE unless a
@@ -234,12 +249,32 @@ python -m el_verificador verify \
   --head HEAD \
   --dry-run
 
-# 3. Check the audit trail
+# 4. Check the record
 python -m el_verificador audit --verify-chain
+python -m el_verificador audit --receipts
 ```
 
 Exit codes: `0` pass, `1` fail or escalate, `2` inconclusive (no verdict was
 reached — nothing ran).
+
+## The MCP surface
+
+The verifier is also an MCP server, so an agent can ask it instead of
+reimplementing checks. That is what keeps the checker from being the author:
+Taskrivet wrote the code, and the tool that judges it runs in another process
+with another context.
+
+```bash
+pip install 'el-verificador[mcp]'
+el-verificador-mcp            # stdio transport
+```
+
+| Tool | What it does |
+|------|--------------|
+| `verify_work_package` | Verify a work package against a repository and return the verdict, the obligations and the evidence hashes |
+| `verification_status` | The last recorded verdict for a work package |
+| `verification_evidence` | The evidence artifacts behind a receipt, with their hashes |
+| `verify_receipt_chain` | Check the integrity of the verification record |
 
 ## Verification Cycle
 
