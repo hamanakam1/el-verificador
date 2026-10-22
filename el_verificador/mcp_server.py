@@ -166,7 +166,7 @@ def build_server(tools: Optional[VerificationTools] = None) -> Any:
         ),
     )
 
-    @server.tool(
+    @server.tool(  # type: ignore[untyped-decorator]
         name="verify_work_package",
         description=(
             "Verify a distilled work package against a repository. Runs the "
@@ -186,7 +186,7 @@ def build_server(tools: Optional[VerificationTools] = None) -> Any:
             work_package, repo_path, base_commit, head_commit, dry_run
         )
 
-    @server.tool(
+    @server.tool(  # type: ignore[untyped-decorator]
         name="verification_status",
         description=(
             "The last recorded verdict for a work package, with the receipt "
@@ -196,7 +196,7 @@ def build_server(tools: Optional[VerificationTools] = None) -> Any:
     def _verification_status(work_package_id: str) -> Dict[str, Any]:
         return toolset.verification_status(work_package_id)
 
-    @server.tool(
+    @server.tool(  # type: ignore[untyped-decorator]
         name="verification_evidence",
         description=(
             "The evidence artifacts behind a receipt, with the content hash "
@@ -206,7 +206,7 @@ def build_server(tools: Optional[VerificationTools] = None) -> Any:
     def _verification_evidence(receipt_id: str) -> Dict[str, Any]:
         return toolset.verification_evidence(receipt_id)
 
-    @server.tool(
+    @server.tool(  # type: ignore[untyped-decorator]
         name="verify_receipt_chain",
         description=(
             "Check the integrity of the verification record: every receipt's "

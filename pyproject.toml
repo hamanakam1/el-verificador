@@ -69,6 +69,14 @@ disallow_untyped_defs = true
 module = ["docker", "docker.*"]
 ignore_missing_imports = true
 
+# `mcp` is an optional extra and ships no type information, so the MCP
+# surface is untyped to mypy. Its decorators are untyped too, which strict
+# mode rejects; the functions themselves are annotated, so the annotations
+# still hold the contract.
+[[tool.mypy.overrides]]
+module = ["mcp", "mcp.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
