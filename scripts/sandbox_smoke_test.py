@@ -88,11 +88,12 @@ def _build_repo(root: Path) -> tuple:
     _git(repo, "commit", "-qm", "base")
     base = _git(repo, "rev-parse", "HEAD")
 
+    # The change is deliberately left **uncommitted**. Committing the
+    # verified work is the verifier's job, so a fixture that pre-commits it
+    # leaves the commit step with nothing to stage and the run reports a
+    # pass it could not act on.
     (repo / "demo.py").write_text(HEAD_MODULE)
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "head")
-    head = _git(repo, "rev-parse", "HEAD")
-    return repo, base, head
+    return repo, base, "HEAD"
 
 
 async def main() -> int:

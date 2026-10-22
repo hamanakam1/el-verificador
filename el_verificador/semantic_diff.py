@@ -239,11 +239,26 @@ class SemanticDiffEngine:
             removed = int(removed_raw) if removed_raw.isdigit() else 0
             counts[path] = (added, removed)
 
+        if self.covers_worktree:
+            # `git diff` does not list files git does not track yet, so a
+            # brand new module was invisible to the whole verification: no
+            # obligation saw it, no symbol check looked inside it, and the
+            # scope check never counted it. Untracked files are new work and
+            # belong to the change set.
+            for path in self._untracked_files():
+                if path not in status_by_path:
+                    status_by_path[path] = "A"
+
         changes: List[_FileChange] = []
         for path, code in status_by_path.items():
             added, removed = counts.get(path, (0, 0))
             changes.append(_FileChange(path=path, status=code, added=added, removed=removed))
         return changes
+
+    def _untracked_files(self) -> List[str]:
+        """Files in the working tree that git does not track yet."""
+        result = self._git(["ls-files", "--others", "--exclude-standard"])
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
     def _git(self, args: List[str]) -> "subprocess.CompletedProcess[str]":
         """Run a git command and decode its output leniently.
