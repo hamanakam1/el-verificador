@@ -117,12 +117,15 @@ def identifiers_in(text: str) -> Set[str]:
     A goal that literally names `create_user_route` produces that identifier;
     a goal written in prose ("create user route") produces nothing, and the
     symbol obligation then declines to apply rather than guessing.
+
+    An all-caps token is **not** treated as a symbol. Goals say "the POST
+    /users/register endpoint" and "the JSON payload"; HTTP methods and
+    acronyms are not identifiers, and requiring a symbol called `post`
+    would fail a change that did exactly what was asked.
     """
     found: Set[str] = set()
     for token in _IDENTIFIER_RE.findall(text):
         if "_" in token and len(token) > 2:
-            found.add(token.lower())
-        elif token.isupper() and len(token) > 2:
             found.add(token.lower())
     for match in _CAMEL_RE.finditer(text):
         token = match.group(0)

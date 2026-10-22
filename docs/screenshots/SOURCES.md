@@ -10,8 +10,8 @@ file records what produced each one so they can be regenerated and checked.
 | `01-verify-pass.png` | El Verificador verifying a passing work package: three acceptance checks green, intent diff computed, code committed | `scripts/capture_screenshots.py` |
 | `02-correction-prompt.png` | The bounded Correction Prompt handed back to Taskrivet — the real failing assertion, the real lint error, the real semantic diff | `scripts/capture_screenshots.py` |
 | `03-escalate.png` | The retry guardrail: three attempts, all failed, `decision: escalate` | `scripts/capture_screenshots.py` |
-| `04-audit-chain.png` | `audit --verify-chain` over a populated ledger | `scripts/capture_screenshots.py` |
-| `05-audit-trail.png` | The audit hash chain: each record's `previous_audit_hash` pointing at its predecessor's `content_hash` | `scripts/capture_screenshots.py` |
+| `04-audit-chain.png` | `audit --verify-chain` over a populated record: the receipt chain and the ledger cache | `scripts/capture_screenshots.py` |
+| `05-audit-trail.png` | The audit trail for one work package, with each record's content hash | `scripts/capture_screenshots.py` |
 | `06-config-init.png` | `config --init` writing the configuration file | `scripts/capture_screenshots.py` |
 
 ## The El Verificador images
@@ -21,9 +21,22 @@ demo repository in `docs/examples/`, runs the actual `el_verificador` CLI
 against it, and replays the bytes it received into a terminal window via
 `scripts/render_terminal.py`.
 
-Nothing is mocked. The acceptance commands in the demo (`pytest`, `ruff`,
-`bandit`) really run; the failing scenario really breaks a test; the audit
-chain really is a SQLite hash chain.
+Nothing is mocked. The demo repository is real, the failing scenario really
+breaks a test, the acceptance commands really run, and the record really is a
+hash chain.
+
+**How the acceptance results are obtained.** El Verificador never runs an
+acceptance command on the host — that is the one thing it must never do, and
+the capture host may not have a Docker daemon. So the capture script runs the
+acceptance commands itself, with the same toolchain the sandbox image carries
+(`pytest`, `ruff`, `bandit`), and records their real output into
+`checks.json`. The CLI replays that recording. The CLI's own output — the
+verdict, the obligations, the analysis, the prompt — is real; only the
+command's *result* is a recording.
+
+`scripts/sandbox_smoke_test.py` runs the same acceptance commands against a
+real container, and CI runs it on every push. The container path and the
+recording path exercise the same decision code.
 
 Regenerate with:
 
@@ -34,10 +47,10 @@ python scripts/capture_screenshots.py
 The script needs `jq` on `PATH` and creates an isolated toolchain with `ruff`,
 `bandit` and `pytest` under `~/.cache/el-verificador/demo-venv`.
 
-Two things the El Verificador captures make visible that prose does not: the
-intent-coverage score reads `0.30` against a configured threshold of `0.85`
-while the run still passes, and the three-attempt escalation is real. See
-`ROADMAP.md` Appendix C.
+The captures make visible what prose does not: the passing run's obligation
+coverage reads `1.0` against a configured threshold of `0.85`, the failing run
+names the exact assertions and the unused import that caused it, and the
+three-attempt escalation is real. See `ROADMAP.md` Appendix C.
 
 ## The Taskrivet images
 

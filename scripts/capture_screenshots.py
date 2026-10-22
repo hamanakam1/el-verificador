@@ -142,34 +142,66 @@ def build_demo_repo(work: Path, venv_python: Path, broken: bool) -> None:
     (work / "work_package.json").write_text(json.dumps(WORK_PACKAGE, indent=2) + "\n")
 
     # --- acceptance config --------------------------------------------- #
-    # The toolchain is exposed to the demo repo as a project-local `.venv`
-    # symlink so the recorded acceptance commands stay short and readable.
-    venv_link = work / ".venv"
-    if not venv_link.exists():
-        venv_link.symlink_to(Path(venv_python).parent.parent)
-
     (work / "verificador.yaml").write_text(
         "ollama_base_url: \"http://127.0.0.1:11434\"\n"
-        "model: \"qwen2.5:14b\"\n"
+        "model: \"qwen3.8:latest\"\n"
         "model_temperature: 0.1\n"
         "model_timeout: 60\n"
         "edgerecord_db: \"~/.edgerecord/ledger.sqlite\"\n"
+        "evidence_root: \"~/.el-verificador/evidence\"\n"
+        "receipt_dir: \"~/.el-verificador/receipts\"\n"
         "docker_image: \"el-verificador/sandbox:local\"\n"
         "docker_workdir: \"/workspace\"\n"
         "docker_timeout: 300\n"
         "docker_remove_on_teardown: true\n"
         "test_commands:\n"
-        "  - \".venv/bin/python -m pytest -q\"\n"
-        "  - \".venv/bin/ruff check .\"\n"
-        "  - \".venv/bin/bandit -r app -q\"\n"
+        "  - \"pytest -q\"\n"
+        "  - \"ruff check .\"\n"
+        "  - \"bandit -r app -q\"\n"
         "max_retries: 3\n"
         "max_retry_duration_ms: 600000\n"
         "intent_coverage_threshold: 0.85\n"
         "fail_on_todo_stubs: true\n"
+        "scope_mode: \"warn\"\n"
+        "goal_terms_enforced: true\n"
+        "behavior_mode: \"warn\"\n"
         "commit_branch: \"main\"\n"
         "commit_message_prefix: \"feat(el-verificador):\"\n"
-        "dry_run: false\n"
+        "dry_run: true\n"
     )
+
+
+def record_checks(work: Path, venv_python: Path) -> Path:
+    """
+    Run the acceptance commands for real and record their results.
+
+    The capture host may not have a Docker daemon, and the verifier never
+    runs a command on the host. So the acceptance results are produced here
+    by the same tools the sandbox image carries — pytest, ruff and bandit —
+    and recorded into a fixture that the CLI replays. The CLI's own output
+    is real; only the command's *result* is a recording.
+
+    `scripts/sandbox_smoke_test.py` runs the same acceptance commands
+    against a real container, and CI runs it.
+    """
+    toolchain = Path(venv_python).parent
+    checks = []
+    for command in ("pytest -q", "ruff check .", "bandit -r app -q"):
+        argv = [str(toolchain / command.split()[0]), *command.split()[1:]]
+        proc = subprocess.run(
+            argv, cwd=str(work), capture_output=True, text=True, timeout=300
+        )
+        checks.append(
+            {
+                "command": command,
+                "exit_code": proc.returncode,
+                "stdout": proc.stdout,
+                "stderr": proc.stderr,
+            }
+        )
+    path = work / "checks.json"
+    path.write_text(json.dumps({"checks": checks}, indent=2) + "\n")
+    return path
 
 
 def cli_env() -> dict:
@@ -231,6 +263,8 @@ VERIFY_CMD = [
     "--base", "HEAD~1",
     "--head", "HEAD",
     "--config", "verificador.yaml",
+    "--dry-run",
+    "--check-fixture", "checks.json",
 ]
 
 PASS_FILTER = """{
@@ -299,6 +333,14 @@ PROMPT_VERIFY = (
 )
 
 
+def json_block(out: str) -> str:
+    """The JSON document the CLI printed after its human-readable report."""
+    start = out.rfind("\n{\n")
+    if start == -1:
+        raise RuntimeError("no verification result found in the CLI output")
+    return out[start + 1 :]
+
+
 def run_jq(payload: str, filter_expr: str, cwd: Path) -> str:
     """Pipe a JSON document through jq without involving a shell."""
     proc = subprocess.run(
@@ -316,9 +358,10 @@ def run_jq(payload: str, filter_expr: str, cwd: Path) -> str:
 def capture_verify_pass(work: Path, outdir: Path, tmp: Path) -> None:
     print("scenario: verify (pass)")
     build_demo_repo(work, Path(os.environ["EV_DEMO_PYTHON"]), broken=False)
+    record_checks(work, Path(os.environ["EV_DEMO_PYTHON"]))
 
     proc = run(VERIFY_CMD, cwd=work, env=cli_env(), check=False)
-    pretty = run_jq(proc.stdout, PASS_FILTER, work)
+    pretty = run_jq(json_block(proc.stdout), PASS_FILTER, work)
 
     body = prompt_line(
         PROMPT_VERIFY + " | jq '{decision, checks, intent}'",
@@ -336,6 +379,7 @@ def capture_failure(outdir: Path, tmp: Path) -> None:
     print("scenario: verify (fail -> correction -> escalate)")
     work = tmp / "demo-broken"
     build_demo_repo(work, Path(os.environ["EV_DEMO_PYTHON"]), broken=True)
+    record_checks(work, Path(os.environ["EV_DEMO_PYTHON"]))
 
     proc = run(VERIFY_CMD, cwd=work, env=cli_env(), check=False)
     out = proc.stdout or ""
@@ -358,10 +402,7 @@ def capture_failure(outdir: Path, tmp: Path) -> None:
     )
 
     # --- escalation ------------------------------------------------------ #
-    json_start = out.rfind("\n{\n")
-    if json_start == -1:
-        raise RuntimeError("no verification result found in the CLI output")
-    pretty = run_jq(out[json_start:], ESCALATE_FILTER, work)
+    pretty = run_jq(json_block(out), ESCALATE_FILTER, work)
 
     body = prompt_line(
         PROMPT_VERIFY + " | jq '{decision, attempts}'",

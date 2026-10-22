@@ -300,10 +300,6 @@ class CorrectionPrompt(BaseModel):
             lines.append(f"Exit code: {check.exit_code}")
             if not check.executed:
                 lines.append("This command did not run, so it carries no result.")
-            if check.failure_summary:
-                lines.append("```")
-                lines.append(check.failure_summary)
-                lines.append("```")
             lines.append("")
         if self.stack_traces:
             lines.append("## Stack Traces")

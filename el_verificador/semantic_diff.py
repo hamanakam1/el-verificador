@@ -256,8 +256,6 @@ class SemanticDiffEngine:
                         before=sym.source,
                     )
                 )
-                if self._is_test_symbol(sym):
-                    weakened.append(f"{path}::{sym.qualified} (removed)")
 
         for sym in head_symbols:
             previous = base_by_name.get(sym.qualified)
@@ -296,6 +294,16 @@ class SemanticDiffEngine:
                     reason = self._weakening_reason(previous, sym)
                     if reason:
                         weakened.append(f"{path}::{sym.qualified} ({reason})")
+
+        # A removed test is only weakening if the file lost tests. A renamed
+        # test is a removal plus an addition, and treating it as a deletion
+        # would fail every change that renames a test as it implements it.
+        base_tests = sum(1 for s in base_symbols if self._is_test_symbol(s))
+        head_tests = sum(1 for s in head_symbols if self._is_test_symbol(s))
+        if head_tests < base_tests:
+            weakened.append(
+                f"{path} ({base_tests - head_tests} test(s) removed)"
+            )
 
         return changes, stubs, weakened
 

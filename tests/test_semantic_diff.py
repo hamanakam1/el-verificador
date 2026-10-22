@@ -210,7 +210,23 @@ class TestTestWeakeningDetection(unittest.TestCase):
 
         diff = self.repo.diff(base, head)
         self.assertTrue(diff.weakened_tests)
-        self.assertIn("test_bad", " ".join(diff.weakened_tests))
+        self.assertIn("test(s) removed", " ".join(diff.weakened_tests))
+
+    def test_a_renamed_test_is_not_a_deletion(self):
+        """A rename is a removal plus an addition, not a weakening."""
+        self.repo.write(
+            "tests/test_api.py",
+            "def test_old_name():\n    assert True\n",
+        )
+        base = self.repo.commit("base")
+        self.repo.write(
+            "tests/test_api.py",
+            "def test_new_name():\n    assert True\n",
+        )
+        head = self.repo.commit("head")
+
+        diff = self.repo.diff(base, head)
+        self.assertEqual(diff.weakened_tests, [])
 
     def test_a_skip_marker_is_detected(self):
         self.repo.write(
