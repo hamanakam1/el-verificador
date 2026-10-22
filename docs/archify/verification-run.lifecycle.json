@@ -1,13 +1,10 @@
 {
-  "schema_version": 1,
+  "schema_version": 3,
   "diagram_type": "lifecycle",
   "meta": {
     "title": "El Verificador — Verification Run Lifecycle",
+    "subtitle": "From a distilled work package to a committed, receipted result — and the bounded route back when it fails.",
     "output": "docs/archify/verification-run.lifecycle.html",
-    "viewBox": [
-      1060,
-      632
-    ],
     "quality_profile": "showcase",
     "views": [
       {
@@ -48,28 +45,20 @@
       }
     ]
   },
-  "lanes": [
-    {
-      "id": "main",
-      "label": "Verification run"
-    },
-    {
-      "id": "retry",
-      "label": "Guardrailed correction loop"
-    },
-    {
-      "id": "terminal",
-      "label": "Terminal outcomes"
-    }
+  "mainPath": [
+    "received",
+    "sandbox",
+    "checks",
+    "sealed",
+    "align",
+    "committed"
   ],
   "states": [
     {
       "id": "received",
       "type": "start",
       "label": "Work Package",
-      "sublabel": "acceptance plan received",
-      "lane": "main",
-      "col": 0,
+      "sublabel": "acceptance plan",
       "step": "01",
       "tag": "intake"
     },
@@ -77,9 +66,7 @@
       "id": "sandbox",
       "type": "active",
       "label": "Sandbox Ready",
-      "sublabel": "pinned image, offline",
-      "lane": "main",
-      "col": 1,
+      "sublabel": "image pinned, offline",
       "step": "02",
       "tag": "isolate"
     },
@@ -87,9 +74,7 @@
       "id": "checks",
       "type": "active",
       "label": "Acceptance Checks",
-      "sublabel": "contract commands run",
-      "lane": "main",
-      "col": 2,
+      "sublabel": "contract commands",
       "step": "03",
       "tag": "run"
     },
@@ -97,9 +82,7 @@
       "id": "sealed",
       "type": "active",
       "label": "Evidence Sealed",
-      "sublabel": "content-addressed, frozen",
-      "lane": "main",
-      "col": 3,
+      "sublabel": "evidence frozen",
       "step": "04",
       "tag": "freeze"
     },
@@ -107,9 +90,7 @@
       "id": "align",
       "type": "decision",
       "label": "Obligation Gate",
-      "sublabel": "deterministic decide()",
-      "lane": "main",
-      "col": 4,
+      "sublabel": "decide()",
       "step": "05",
       "tag": "gate"
     },
@@ -117,99 +98,83 @@
       "id": "correction",
       "type": "waiting",
       "label": "Correction Issued",
-      "sublabel": "violated obligations named",
-      "lane": "retry",
-      "col": 1,
+      "sublabel": "violations named",
       "tag": "bounded"
     },
     {
       "id": "guard",
       "type": "failure",
       "label": "No-Progress Guard",
-      "sublabel": "attempts spent or unchanged",
-      "lane": "retry",
-      "col": 0,
-      "yOffset": 74,
+      "sublabel": "attempts spent",
       "tag": "fail-fast"
     },
     {
       "id": "committed",
       "type": "success",
       "label": "Committed",
-      "sublabel": "verified branch, receipt",
-      "lane": "terminal",
-      "col": 2,
+      "sublabel": "branch + receipt",
       "tag": "pass"
     },
     {
       "id": "escalated",
       "type": "failure",
       "label": "Escalated",
-      "sublabel": "flagged for human review",
-      "lane": "terminal",
-      "col": 0,
+      "sublabel": "for review",
       "tag": "human"
     }
   ],
   "transitions": [
     {
+      "id": "t-received-sandbox",
+      "from": "received",
+      "to": "sandbox"
+    },
+    {
+      "id": "t-sandbox-checks",
+      "from": "sandbox",
+      "to": "checks"
+    },
+    {
+      "id": "t-checks-sealed",
+      "from": "checks",
+      "to": "sealed"
+    },
+    {
+      "id": "t-sealed-align",
+      "from": "sealed",
+      "to": "align"
+    },
+    {
       "id": "t-align-committed",
       "from": "align",
       "to": "committed",
-      "label": "every obligation satisfied",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "route": "drop",
-      "labelAt": [
-        830,
-        330
-      ]
+      "label": "all met"
     },
     {
       "id": "t-align-correction",
       "from": "align",
       "to": "correction",
       "label": "obligation violated or unproven",
-      "variant": "security",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "labelAt": [
-        560,
-        205
-      ]
+      "variant": "security"
     },
     {
       "id": "t-correction-checks",
       "from": "correction",
       "to": "checks",
       "label": "agent applied the fix",
-      "variant": "emphasis",
-      "fromSide": "top",
-      "toSide": "bottom"
+      "variant": "emphasis"
     },
     {
       "id": "t-correction-guard",
       "from": "correction",
       "to": "guard",
-      "label": "retries exhausted",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "labelAt": [
-        430,
-        300
-      ]
+      "label": "retries exhausted"
     },
     {
       "id": "t-guard-escalated",
       "from": "guard",
       "to": "escalated",
-      "label": "escalate now",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "labelAt": [
-        402,
-        432
-      ]
+      "label": "escalate now"
     }
   ],
   "cards": [

@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "artifact": "verification-run.lifecycle.html",
+  "sha256": "9ca26d015ffd74ce3dc7d03a44752c6721ffa7a223fbef25cd376408d49b5ecc",
+  "specification": "verification-run.lifecycle.json",
+  "specificationSha256": "35be42c44a8694f88326b93fbe66e65cff4a23534744ebb1146ce4628842eb1f",
+  "renderer": {
+    "version": "3.2.0",
+    "pin": "local archify 3.2.0"
+  },
+  "deterministicValidation": {
+    "gates": {
+      "validate": "pass",
+      "deliver": "pass",
+      "check": "pass",
+      "browser-check": "pass"
+    },
+    "diagnostics": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  "browserContainment": {
+    "status": "pass",
+    "viewports": [
+      "1440x900",
+      "1600x1000",
+      "1920x1080",
+      "2048x1320"
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "minimumProjectedNodeTextPx": 6
+  },
+  "manualVisualReview": {
+    "status": "pass",
+    "captures": [
+      "1600x1150 light",
+      "3200x2000 dark"
+    ],
+    "notes": "Main path reads left to right; the correction loop returns to Acceptance Checks and the guard escalates downward. Labels are legible at 1x and no state or edge is clipped at the checked sizes."
+  },
+  "sourceEvidence": [
+    {
+      "path": "el_verificador/engine.py",
+      "sha256": "2f2d0e45319847b85a7cefa10eaa407c98267ee89564a67695f9c1d636e2ca7f",
+      "scope": "the code this diagram describes"
+    },
+    {
+      "path": "el_verificador/correction.py",
+      "sha256": "a713383e457135320315d05e41cb76c2bd55104a8aada04a9608e5a15d8d10f8",
+      "scope": "the code this diagram describes"
+    },
+    {
+      "path": "el_verificador/schemas.py",
+      "sha256": "97c4d5585ab82587cb3318f3dafd4fe54ee86c57e2c65c3fc879f0d18fa1c94f",
+      "scope": "the code this diagram describes"
+    }
+  ],
+  "limits": "The diagram describes the intended verification lifecycle. Ticket Board escalation and a canonical EdgeRecord receipt are not yet implemented; the Escalated state shows the target behaviour."
+}

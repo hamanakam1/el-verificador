@@ -91,6 +91,20 @@ operator's machine would be the one thing it must never do.
 5. **Taskrivet:** Executes the code inside the sandbox
 6. **El Verificador:** Audits the execution, manages the retry loop, and commits the state to EdgeRecord
 
+## The Verification Run
+
+![El Verificador verification run lifecycle](docs/archify/verification-run.lifecycle.png)
+
+One work package, from intake to a committed, receipted result. The decision
+happens at the **Obligation Gate** and is a pure function of evidence sealed
+before it. A violated obligation routes back through a **bounded** correction
+loop; a run that stops making progress hits the **No-Progress Guard** and
+escalates to a human rather than retrying forever.
+
+The interactive diagram, with the spec and its delivery receipt, is in
+[`docs/archify/`](docs/archify/). How it was produced and how to regenerate it
+is recorded in [`docs/archify/verification-run.lifecycle.delivery.json`](docs/archify/verification-run.lifecycle.delivery.json).
+
 ## Screenshots
 
 Every image below is a **real captured CLI run**, replayed into a terminal
@@ -302,6 +316,7 @@ el-verificador-mcp            # stdio transport
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 | [SECURITY.md](SECURITY.md) | Security posture and reporting |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [docs/archify/](docs/archify/) | The verification-run lifecycle diagram, its specification and its delivery receipt |
 | [docs/screenshots/](docs/screenshots/) | The captured runs shown above |
 | [docs/screenshots/SOURCES.md](docs/screenshots/SOURCES.md) | How each screenshot was produced, and how to regenerate it |
 | [docs/examples/](docs/examples/) | The demo repository the CLI screenshots verify |
