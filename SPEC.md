@@ -51,8 +51,39 @@ El Verificador compares the actual AST changes and git diff against the
 - Are changed files covered by the work package's `related_files`?
 - Do goal keywords appear as code identifiers?
 
-If intent coverage is below threshold or TODO stubs are detected, verification
-fails.
+The diff is computed from the real source, not from a symbol name:
+
+- A symbol that was **rewritten** is reported as `MODIFIED`, with the old and
+  new source. Comparing symbol names alone cannot see a changed function body.
+- A **stub** is a function, method, or class whose whole body is `pass`, `...`,
+  or `raise NotImplementedError`. A `TODO`/`FIXME` counts only when it is a
+  real comment — the word "bypass" is not a `pass` statement, and a TODO inside
+  a string literal is not a TODO.
+- The **coverage score** is the weighted combination of the declared scope
+  that was touched and the goal's checkable claims that the changed code
+  provides. The checkable claims are the **identifiers the goal names** —
+  `register_user`, `validate_payload`, `app/routes/users.py`. Prose is not a
+  claim anyone can check against code, and counting it would make the score
+  depend on how the goal happened to be worded. A goal that names no
+  identifiers falls back to its significant words, and the basis says which
+  was used. The score is reported with its inputs: the goal words, the ones
+  that were covered, the ones that were not, the identifiers the goal named,
+  and the related files that were touched. A score with no inputs cannot be
+  audited.
+
+Verification fails when:
+
+- a stub or a TODO comment is found (`fail_on_todo_stubs`, default on);
+- nothing changed at all; or
+- the goal names identifiers and the change provides **none** of them. A
+  change that contains none of the things the goal asked for is not an
+  attempt at the goal, however green the acceptance commands are.
+
+The configured `intent_coverage_threshold` is **reported, not yet a gate**:
+turning it into one before the score is calibrated against a population of
+real work packages would fail correct implementations that spell a name
+differently. The decision model that replaces it is specified in `ROADMAP.md`
+(Phase 2, the obligation model).
 
 ### 3. The Guardrailed Feedback Loop
 
@@ -86,8 +117,8 @@ All contracts are pydantic v2 models (`extra="forbid"`):
 |-------|---------|
 | `IntentPackage` | Lightweight view of a `DistilledWorkPackage` consumed by the verifier |
 | `CheckResult` | Result of one acceptance check (exit code, stdout, stderr) |
-| `SemanticDiff` | AST/git diff vs. distilled intent; intent coverage score |
-| `CorrectionPrompt` | Bounded prompt handed back to Taskrivet on failure |
+| `SemanticDiff` | AST/git diff vs. distilled intent; coverage score with its goal words, covered words, uncovered words, and touched related files |
+| `CorrectionPrompt` | Bounded prompt handed back to Taskrivet on failure, plus the optional advisory note composed by the local model |
 | `VerificationResult` | Complete result of one verification run |
 | `VerificationAudit` | Immutable EdgeRecord audit record (SHA256 hash + hash chain) |
 
@@ -109,8 +140,8 @@ mode) at `~/.edgerecord/ledger.sqlite`:
 | Guardrail | Value |
 |-----------|-------|
 | `max_retries` | 3 (hard iteration limit) |
-| Intent coverage threshold | 0.85 |
-| Fail on TODO stubs | enabled |
+| Intent coverage threshold | 0.85 — reported with its inputs; a gate once the score is calibrated (see §2) |
+| Fail on TODO stubs | enabled — honours `fail_on_todo_stubs`; a stub or a TODO comment fails the run |
 | Dry-run mode | available for offline development |
 | Local-first | no cloud dependencies; Ollama Qwen at `http://127.0.0.1:11434` |
 

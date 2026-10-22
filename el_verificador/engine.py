@@ -148,7 +148,6 @@ class ElVerificador:
 
         all_checks_pass = all(c.passed for c in check_results)
         intent_aligned = self._intent_aligned(semantic_diff)
-
         if all_checks_pass and intent_aligned:
             decision = VerificationDecision.PASS
         else:
@@ -210,13 +209,59 @@ class ElVerificador:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
-    @staticmethod
-    def _intent_aligned(diff: SemanticDiff) -> bool:
+    def _intent_aligned(self, diff: SemanticDiff) -> bool:
+        """Did the change actually address the intent?
+
+        Three rules, none of which depends on the coverage score:
+
+        1. Something must have changed.
+        2. There must be no stub left behind.
+        3. If the goal names identifiers, the change must provide at least
+           one of them. A change that contains none of the things the goal
+           asked for is not an attempt at the goal, whatever else it does.
+
+        The coverage score is reported with its inputs but is not yet a gate.
+        The decision model that replaces it is specified in ROADMAP.md
+        (Phase 2, the obligation model); until that lands, a threshold that
+        is not calibrated against real work packages would fail correct
+        implementations that spell a name differently.
+        """
         if not diff.files_changed:
             return False
-        if diff.has_todo_stubs:
+        if self.config.fail_on_todo_stubs and diff.has_todo_stubs:
+            return False
+        if diff.named_identifiers and not diff.covered_tokens:
             return False
         return True
+
+    def _coverage_evidence(self, diff: Optional[SemanticDiff]) -> list[str]:
+        """Publish the inputs of the coverage score alongside the score.
+
+        A coverage number with no inputs cannot be audited, and a reviewer
+        cannot tell a correct implementation from a stub by looking at 0.30.
+        """
+        if diff is None:
+            return []
+        evidence = [f"coverage_basis={diff.coverage_basis}"]
+        if diff.goal_tokens:
+            evidence.append(
+                f"goal_tokens={len(diff.goal_tokens)} "
+                f"covered={len(diff.covered_tokens)} "
+                f"uncovered={len(diff.uncovered_tokens)}"
+            )
+        if diff.uncovered_tokens:
+            evidence.append(
+                "uncovered_goal_words=" + ",".join(diff.uncovered_tokens[:12])
+            )
+        if diff.named_identifiers:
+            evidence.append(
+                "named_identifiers=" + ",".join(diff.named_identifiers[:12])
+            )
+        if diff.related_files_touched:
+            evidence.append(
+                "related_files_touched=" + ",".join(diff.related_files_touched[:12])
+            )
+        return evidence
 
     def _build_audit(
         self,
@@ -261,6 +306,7 @@ class ElVerificador:
                 else "no_diff",
                 f"attempts={len(result.attempts)}",
             ]
+        key_evidence.extend(self._coverage_evidence(result.semantic_diff))
 
         audit = VerificationAudit(
             work_package_id=intent.id,

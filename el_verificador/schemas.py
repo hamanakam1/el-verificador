@@ -119,6 +119,33 @@ class SemanticDiff(BaseModel):
         description="Names of symbols that appear to be stubs",
     )
 
+    # How the coverage score was computed, and what it was computed from.
+    # The number is only auditable if the inputs are published with it.
+    coverage_basis: str = Field(
+        default="",
+        description="How intent_coverage was computed",
+    )
+    goal_tokens: List[str] = Field(
+        default_factory=list,
+        description="Significant words of the distilled goal",
+    )
+    covered_tokens: List[str] = Field(
+        default_factory=list,
+        description="Goal words that appear in the changed symbols",
+    )
+    uncovered_tokens: List[str] = Field(
+        default_factory=list,
+        description="Goal words that no changed symbol contains",
+    )
+    related_files_touched: List[str] = Field(
+        default_factory=list,
+        description="Declared related files that the change actually touched",
+    )
+    named_identifiers: List[str] = Field(
+        default_factory=list,
+        description="Identifiers the distilled goal names, such as register_user",
+    )
+
     @property
     def aligned(self) -> bool:
         """Intent alignment: meaningful changes, coverage above threshold, no stubs."""
@@ -175,6 +202,13 @@ class CorrectionPrompt(BaseModel):
     stack_traces: List[str] = Field(default_factory=list)
     test_output: str = Field(default="")
     semantic_diff: Optional[SemanticDiff] = None
+    llm_text: Optional[str] = Field(
+        default=None,
+        description=(
+            "Advisory wording composed by the local model. It never replaces "
+            "the deterministic evidence below it."
+        ),
+    )
 
     def render(self) -> str:
         """Render the full Correction Prompt text for Taskrivet."""
@@ -220,10 +254,25 @@ class CorrectionPrompt(BaseModel):
             lines.append(
                 f"Intent coverage: {self.semantic_diff.intent_coverage:.2f}"
             )
+            if self.semantic_diff.coverage_basis:
+                lines.append(f"Coverage basis: {self.semantic_diff.coverage_basis}")
+            if self.semantic_diff.uncovered_tokens:
+                lines.append(
+                    "Goal words not present in the change: "
+                    + ", ".join(self.semantic_diff.uncovered_tokens[:40])
+                )
             if self.semantic_diff.has_todo_stubs:
                 lines.append(
                     f"Stub symbols detected: {', '.join(self.semantic_diff.stub_symbols)}"
                 )
+            lines.append("")
+        if self.llm_text:
+            # Advisory only. The deterministic evidence above is what the
+            # decision was made from; this is wording, not authority.
+            lines.append("## Advisor's Note (advisory, not evidence)")
+            lines.append("```")
+            lines.append(self.llm_text[-3000:])
+            lines.append("```")
             lines.append("")
         lines.append("## Required Action")
         lines.append(

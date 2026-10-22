@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **The semantic diff could not see a rewritten function body.** Symbols were
+  compared by a tag (`"FunctionDef:name"`) that was identical at both
+  revisions, so `MODIFIED` was never emitted and a changed function looked
+  untouched. Symbols now carry their real source segment, and they are matched
+  by kind and qualified name so `A.render` and `B.render` are not confused.
+- **The intent-coverage score measured the wrong thing.** It was computed
+  against the symbols found in *stub* lines, so for clean code it collapsed to
+  "how many declared files were touched" and scored a correct implementation
+  and a stub identically. The score is now the weighted combination of the
+  declared scope that was touched and the goal's checkable claims — the
+  identifiers the goal names — compared token by token against symbol names
+  and bodies. Prose is excluded from the denominator, because it cannot be
+  checked against code. It is reported with its inputs: goal words, covered
+  words, uncovered words, the identifiers the goal named, and the touched
+  related files. The audit record carries the same evidence.
+- **A change that ignored the goal entirely could still pass.** The
+  acceptance commands can all exit zero while the agent edits something
+  unrelated. If the goal names identifiers and the change provides none of
+  them, verification now fails. The rule has no false positives: a change
+  that contains none of the things the goal asked for is not an attempt at
+  the goal.
+- **`fail_on_todo_stubs` was never read.** The option was documented and
+  referenced zero times in the engine. It is honoured now; the default stays
+  `true`, so decisions are unchanged.
+- **The model's Correction Prompt was generated and discarded.** The text was
+  smuggled onto the contract with `object.__setattr__` and never read by
+  `render()`. It is a real field now and appears in a clearly labelled
+  *Advisor's Note*, after the deterministic evidence.
+- **Stub detection matched prose.** `pass\s*$` matched "bypass", and `\.\.\.`
+  matched an ellipsis in a docstring. A stub is now a function, method, or
+  class whose whole body is `pass`, `...`, or `raise NotImplementedError`, and
+  a TODO counts only when it is a real comment.
 - **`DockerRunner` crashed on every non-dry-run verification.** The instance
   attribute `_docker_available` shadowed the method `_docker_available()`, so
   any call outside dry-run mode raised

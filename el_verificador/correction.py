@@ -185,9 +185,8 @@ class CorrectionLoop:
             stack_traces=stack_traces,
             test_output=test_output,
             semantic_diff=semantic_diff,
+            llm_text=rendered,
         )
-        if rendered:
-            object.__setattr__(correction, "_llm_text", rendered)
 
         return correction
 
