@@ -35,3 +35,32 @@ Board → El Hidratador → Taskrivet → El Verificador → EdgeRecord pipeline
   SHA256 content hash and hash chain (`previous_audit_hash`).
 - Never trust Taskrivet's self-reported status; verify independently.
 - Add tests under `tests/` for new behavior; run `pytest` before committing.
+- Every rule the verifier enforces needs a test that fails when the rule is
+  removed. The non-dry-run Docker path shipped broken for four commits
+  because only the dry-run path was covered.
+- Stage only the paths you own; never run `git add -A` or `git add .`.
+
+## Screenshots
+
+`docs/screenshots/` holds real captured CLI output, not mock-ups.
+
+- `scripts/render_terminal.py` — replays ANSI terminal bytes into a PNG.
+- `scripts/capture_screenshots.py` — builds the demo repository in
+  `docs/examples/`, runs the actual CLI against it, and writes the PNGs.
+
+Regenerate them when the CLI output shape changes:
+
+```sh
+python scripts/capture_screenshots.py
+```
+
+Requires `jq` on `PATH`. Creates an isolated toolchain with `ruff`, `bandit`
+and `pytest` under `~/.cache/el-verificador/demo-venv`.
+
+## Roadmap
+
+`ROADMAP.md` is the long-term build plan. It carries a verified defect
+list (D1–D26) with file references. Before changing behaviour that affects
+what passes or fails, check the roadmap — several defects are recorded as
+deliberately unfixed pending an operator decision.
+

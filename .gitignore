@@ -1,8 +1,10 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.ruff_cache/
 *.egg-info/
 .build/
 dist/
 .local-config.yaml
 ~/.el-verificador/
+docs/examples/**/.venv/

@@ -13,14 +13,6 @@ EEEEEE LLLLL    V   EEEEE R   R   IIIII F     IIIII  CCCC A   A DDDD   OOO  R   
 [![Python: 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![Runtime dependencies: 4](https://img.shields.io/badge/runtime%20dependencies-4-blueviolet)](pyproject.toml)
 [![Releases](https://img.shields.io/github/v/release/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador/releases)
-
-**The building inspector. Independent intent verification and guardrailed feedback routing for the Taskrivet pipeline.**
-
-> *Taskrivet cannot grade its own homework. El Verificador is the gate between "code written" and "code committed".*
-
-[![Tests](https://img.shields.io/github/actions/workflow/status/hamanakam1/el-verificador/tests.yml?branch=main&label=tests)](https://github.com/hamanakam1/el-verificador/actions/workflows/tests.yml)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![Repo size](https://img.shields.io/github/repo-size/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador)
 [![Language](https://img.shields.io/github/languages/top/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador)
 [![Last commit](https://img.shields.io/github/last-commit/hamanakam1/el-verificador/commits/main)](https://github.com/hamanakam1/el-verificador/commits/main)
@@ -29,6 +21,10 @@ EEEEEE LLLLL    V   EEEEE R   R   IIIII F     IIIII  CCCC A   A DDDD   OOO  R   
 [![Issues](https://img.shields.io/github/issues/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador/issues)
 [![Contributors](https://img.shields.io/github/contributors/hamanakam1/el-verificador/graphs/contributors)](https://github.com/hamanakam1/el-verificador/graphs/contributors)
 [![Commit activity](https://img.shields.io/github/commit-activity/m/hamanakam1/el-verificador)](https://github.com/hamanakam1/el-verificador/commits/main)
+
+**The building inspector. Independent intent verification and guardrailed feedback routing for the Taskrivet pipeline.**
+
+> *Taskrivet cannot grade its own homework. El Verificador is the gate between "code written" and "code committed".*
 
 ---
 
@@ -126,7 +122,13 @@ runner, the AST semantic diff, the guardrailed retry loop, git commit +
 teardown, and the hash-chained audit ledger. The verification cycle has run
 end-to-end against a real repository — see the screenshots above.
 
-**Known gaps, all tracked in [docs/ROADMAP.md](docs/ROADMAP.md):**
+Four defects that prevented that from being true are fixed in this change set
+and recorded in [ROADMAP.md](ROADMAP.md) Appendix B: every non-dry-run
+verification crashed on a shadowed method, the primary CLI command crashed on
+its JSON serialisation, dry-run checks ran in the wrong directory, and the
+semantic diff crashed on binary files in the diff.
+
+**Known gaps, all tracked in [ROADMAP.md](ROADMAP.md):**
 
 - Taskrivet dispatch, Ticket Board escalation, and a canonical EdgeRecord
   receipt do not exist yet. `ESCALATE` is currently a return value, not an
@@ -193,7 +195,7 @@ python -m el_verificador audit --verify-chain
 
 | Document | What it covers |
 |----------|----------------|
-| [docs/ROADMAP.md](docs/ROADMAP.md) | The long-term build plan: verified defect list, target architecture, six phases with exit gates, integration contracts, risk register, and the decisions that need an operator |
+| [ROADMAP.md](ROADMAP.md) | The long-term build plan: verified defect list, target architecture, six phases with exit gates, integration contracts, risk register, and the decisions that need an operator |
 | [SPEC.md](SPEC.md) | The system specification |
 | [AGENTS.md](AGENTS.md) | Contributor conventions for agents and humans |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |

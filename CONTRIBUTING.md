@@ -34,7 +34,28 @@ python -m el_verificador verify \
   --work-package path/to/work_package.json \
   --repo /path/to/repo \
   --base HEAD~1 --head HEAD --dry-run
+
+# Regenerate the README screenshots from real CLI runs
+python scripts/capture_screenshots.py
 ```
+
+## Screenshots
+
+`docs/screenshots/` holds real captured CLI output, rendered to PNG by
+`scripts/render_terminal.py` and captured by `scripts/capture_screenshots.py`.
+The capture script builds the two-commit demo repository in `docs/examples/`,
+runs the actual CLI against it, and replays the bytes it received.
+
+Regenerate them whenever the CLI output shape changes, and review the diff:
+a stale screenshot is worse than no screenshot.
+
+```sh
+python scripts/capture_screenshots.py            # writes docs/screenshots/*.png
+python scripts/render_terminal.py capture.txt -o out.png --title "demo"
+```
+
+The capture script needs `jq` on `PATH` and creates an isolated toolchain
+(with `ruff`, `bandit` and `pytest`) under `~/.cache/el-verificador/demo-venv`.
 
 ## Before you open a PR
 
