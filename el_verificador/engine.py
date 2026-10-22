@@ -53,6 +53,7 @@ from .schemas import (
     VerificationResult,
 )
 from .semantic_diff import SemanticDiffEngine
+from .ticket_board import FlagOutcome, TicketBoardAdapter
 
 
 @dataclass
@@ -372,6 +373,47 @@ class ElVerificador:
     # ------------------------------------------------------------------ #
     # The durable record
     # ------------------------------------------------------------------ #
+    def _flag_ticket(
+        self,
+        intent: IntentPackage,
+        result: VerificationResult,
+        escalation_reason: Optional[str],
+    ) -> Optional[FlagOutcome]:
+        """Flag the ticket for human attention, if that is switched on.
+
+        Only an escalation is flagged: a failure that is still inside its
+        retry budget is the pipeline's business, not the operator's.
+        """
+        if not self.config.ticket_board_enabled:
+            return None
+        if result.decision != VerificationDecision.ESCALATE:
+            return None
+        if not intent.ticket:
+            return FlagOutcome(
+                delivered=False,
+                error="the work package named no ticket, so there is nothing to flag",
+            )
+
+        reason = (
+            f"{len(result.attempts)} attempt(s) exhausted for {intent.id} "
+            f"({intent.true_goal_summary}). "
+            f"{escalation_reason or ''} "
+            f"{len(result.evidence_hashes)} evidence artifact(s); "
+            f"receipt {result.receipt_id or 'pending'}."
+        ).strip()
+        try:
+            adapter = TicketBoardAdapter(
+                base_url=self.config.ticket_board_url,
+                timeout=self.config.ticket_board_timeout,
+            )
+            return adapter.flag(intent.ticket, reason)
+        except Exception as exc:  # noqa: BLE001
+            return FlagOutcome(
+                delivered=False,
+                ticket=intent.ticket,
+                error=f"the ticket board could not be reached: {exc}",
+            )
+
     def _write_receipt(
         self,
         intent: IntentPackage,
@@ -380,6 +422,7 @@ class ElVerificador:
         escalation_reason: Optional[str],
     ) -> None:
         """Append a receipt for this decision to the receipt chain."""
+        flag_outcome = self._flag_ticket(intent, result, escalation_reason)
         try:
             chain = ReceiptChain(self.config.receipt_dir)
             receipt = build_receipt(
@@ -387,7 +430,7 @@ class ElVerificador:
                 or f"va-audit-{uuid4().hex[:16]}",
                 kind="verification",
                 outcome=outcome_for_decision(result.decision.value),
-                ticket=None,
+                ticket=intent.ticket,
                 actor="el-verificador",
                 artifacts=artifact_records(result.evidence_artifacts),
                 notes=(
@@ -420,6 +463,8 @@ class ElVerificador:
                     f"{intent.id} ({intent.true_goal_summary})."
                 ),
             )
+            if flag_outcome is not None:
+                receipt["ticket_board"] = flag_outcome.as_dict()
             chain.append(receipt)
             result.receipt_id = receipt["receipt_id"]
             result.receipt_fingerprint = receipt["proof_fingerprint"]

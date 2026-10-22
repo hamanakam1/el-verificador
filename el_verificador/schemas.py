@@ -210,6 +210,9 @@ class IntentPackage(BaseModel):
     acceptance_commands: List[str] = Field(default_factory=list)
     suggested_kind: str = "task"
     scope: List[str] = Field(default_factory=list)
+    ticket: Optional[str] = Field(
+        default=None, description="The board ticket this work package belongs to"
+    )
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "IntentPackage":
@@ -225,6 +228,7 @@ class IntentPackage(BaseModel):
             acceptance_commands=list(data.get("acceptance_commands", []) or []),
             suggested_kind=data.get("suggested_kind", "task"),
             scope=list(data.get("scope", []) or data.get("suggested_scope", []) or []),
+            ticket=data.get("ticket") or data.get("ticket_id"),
         )
 
 
@@ -729,6 +733,14 @@ class VerificationConfig(BaseModel):
 
     # The durable record: an append-only chain of EdgeRecord receipts.
     receipt_dir: str = "~/.el-verificador/receipts"
+
+    # Ticket Board flagging. Off by default: this component writes to
+    # somebody else's board, and that is a decision for the operator, not
+    # for a default. When it is on, the write adds the `needs-human` tag
+    # and never changes a status.
+    ticket_board_enabled: bool = False
+    ticket_board_url: str = "http://127.0.0.1:7878"
+    ticket_board_timeout: int = 10
 
     # Docker sandbox
     docker_image: str = "el-verificador/sandbox:local"
