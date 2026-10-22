@@ -43,4 +43,11 @@ USER verifier
 
 # `sleep infinity` keeps the container alive; the verifier execs into it and
 # tears it down when the run ends.
-ENTRYPOINT ["sleep", "infinity"]
+#
+# This is a CMD, not an ENTRYPOINT. The runner passes the lifecycle command
+# explicitly (`command="sleep infinity"`), and Docker appends a command to an
+# ENTRYPOINT's arguments rather than replacing it — so an ENTRYPOINT here
+# made the container run `sleep infinity sleep infinity`, exit immediately
+# with an invalid time interval, and leave every later check to fail against
+# a container that was no longer running.
+CMD ["sleep", "infinity"]

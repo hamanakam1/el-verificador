@@ -174,6 +174,21 @@ class DockerRunner:
         client = from_env()
         container = client.containers.get(self._container.container_id)
 
+        # A container that has already exited cannot be exec'd into, and the
+        # Docker SDK reports that as a bare 409 ("container ... is not
+        # running"), which says nothing about why. Check first, and report
+        # what actually happened.
+        if container.status != "running":
+            exit_code = container.attrs.get("State", {}).get("ExitCode", 0)
+            error = container.attrs.get("State", {}).get("Error", "")
+            raise SandboxUnavailableError(
+                f"the sandbox container exited before the checks could run "
+                f"(status={container.status!r}, exit code {exit_code}"
+                + (f", error: {error}" if error else "")
+                + f"); image {self.config.docker_image!r} may not be able to "
+                f"keep a long-lived container alive"
+            )
+
         exit_code, stdout, stderr, timed_out = self._exec_with_timeout(
             client, container, command
         )
