@@ -75,6 +75,9 @@ real. Reproduce the whole set with:
 python scripts/capture_screenshots.py
 ```
 
+How each image was produced is recorded in
+[docs/screenshots/SOURCES.md](docs/screenshots/SOURCES.md).
+
 ### A passing verification
 
 Acceptance checks ran, the intent diff was computed, the code was committed:
@@ -200,5 +203,7 @@ python -m el_verificador audit --verify-chain
 | [AGENTS.md](AGENTS.md) | Contributor conventions for agents and humans |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 | [SECURITY.md](SECURITY.md) | Security posture and reporting |
-| [docs/screenshots/](docs/screenshots/) | The captured CLI runs shown above |
-| [docs/examples/](docs/examples/) | The demo repository the screenshots verify |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [docs/screenshots/](docs/screenshots/) | The captured runs shown above |
+| [docs/screenshots/SOURCES.md](docs/screenshots/SOURCES.md) | How each screenshot was produced, and how to regenerate it |
+| [docs/examples/](docs/examples/) | The demo repository the CLI screenshots verify |

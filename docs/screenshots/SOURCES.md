@@ -7,9 +7,37 @@ file records what produced each one so they can be regenerated and checked.
 |------|----------------|--------------------|
 | `taskrivet-workspace.png` | The Taskrivet desktop workspace, with a synthetic ledger behind it | `scripts/capture_taskrivet_screenshots.py` |
 | `taskrivet-failure-ledger.png` | The Taskrivet failure ledger, with a synthetic ledger behind it | `scripts/capture_taskrivet_screenshots.py` |
+| `01-verify-pass.png` | El Verificador verifying a passing work package: three acceptance checks green, intent diff computed, code committed | `scripts/capture_screenshots.py` |
+| `02-correction-prompt.png` | The bounded Correction Prompt handed back to Taskrivet — the real failing assertion, the real lint error, the real semantic diff | `scripts/capture_screenshots.py` |
+| `03-escalate.png` | The retry guardrail: three attempts, all failed, `decision: escalate` | `scripts/capture_screenshots.py` |
+| `04-audit-chain.png` | `audit --verify-chain` over a populated ledger | `scripts/capture_screenshots.py` |
+| `05-audit-trail.png` | The audit hash chain: each record's `previous_audit_hash` pointing at its predecessor's `content_hash` | `scripts/capture_screenshots.py` |
+| `06-config-init.png` | `config --init` writing the configuration file | `scripts/capture_screenshots.py` |
 
-The other images in this directory capture El Verificador itself and are
-produced by `scripts/capture_screenshots.py`.
+## The El Verificador images
+
+These capture El Verificador itself. The capture script builds the two-commit
+demo repository in `docs/examples/`, runs the actual `el_verificador` CLI
+against it, and replays the bytes it received into a terminal window via
+`scripts/render_terminal.py`.
+
+Nothing is mocked. The acceptance commands in the demo (`pytest`, `ruff`,
+`bandit`) really run; the failing scenario really breaks a test; the audit
+chain really is a SQLite hash chain.
+
+Regenerate with:
+
+```sh
+python scripts/capture_screenshots.py
+```
+
+The script needs `jq` on `PATH` and creates an isolated toolchain with `ruff`,
+`bandit` and `pytest` under `~/.cache/el-verificador/demo-venv`.
+
+Two things the El Verificador captures make visible that prose does not: the
+intent-coverage score reads `0.30` against a configured threshold of `0.85`
+while the run still passes, and the three-attempt escalation is real. See
+`ROADMAP.md` Appendix C.
 
 ## The Taskrivet images
 
