@@ -93,20 +93,24 @@ def _build_repo(root: Path) -> tuple:
     # leaves the commit step with nothing to stage and the run reports a
     # pass it could not act on.
     (repo / "demo.py").write_text(HEAD_MODULE)
-    return repo, base, "HEAD"
+    return repo, base
 
 
 async def main() -> int:
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
-        repo, base, head = _build_repo(root)
+        repo, base = _build_repo(root)
 
         config = VerificationConfig(
             dry_run=False,
             commit_branch=_git(repo, "branch", "--show-current"),
         )
         verifier = ElVerificador(config)
-        result = await verifier.verify(WORK_PACKAGE, str(repo), base, head)
+        # No upper bound is given: the default is the working tree, which is
+        # what the verifier judges and then commits. Judging a commit range
+        # instead would skip the commit step, because the working tree is
+        # not what was judged.
+        result = await verifier.verify(WORK_PACKAGE, str(repo), base)
 
     print(json.dumps(result.model_dump(mode="json"), indent=2, default=str))
 
