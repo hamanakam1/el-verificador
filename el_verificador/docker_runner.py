@@ -16,6 +16,15 @@ from typing import List, Optional
 from .schemas import CheckKind, CheckResult, VerificationConfig
 
 
+class SandboxUnavailableError(RuntimeError):
+    """Raised when the Docker sandbox cannot be provisioned.
+
+    Carries an actionable message instead of a raw Docker SDK traceback.
+    The most common cause is a `docker_image` that no local or registry
+    source can provide.
+    """
+
+
 @dataclass
 class ContainerHandle:
     """Opaque handle to a running sandbox container."""
@@ -60,15 +69,25 @@ class DockerRunner:
         client = docker.from_env()
         repo_path = str(Path(repo_path).resolve())
 
-        container = client.containers.run(
-            self.config.docker_image,
-            command="sleep infinity",
-            detach=True,
-            remove=self.config.docker_remove_on_teardown,
-            volumes={repo_path: {"bind": self.config.docker_workdir, "mode": "rw"}},
-            working_dir=self.config.docker_workdir,
-            network_disabled=True,
-        )
+        try:
+            container = client.containers.run(
+                self.config.docker_image,
+                command="sleep infinity",
+                detach=True,
+                remove=self.config.docker_remove_on_teardown,
+                volumes={repo_path: {"bind": self.config.docker_workdir, "mode": "rw"}},
+                working_dir=self.config.docker_workdir,
+                network_disabled=True,
+            )
+        except docker.errors.ImageNotFound as exc:
+            raise SandboxUnavailableError(
+                f"sandbox image {self.config.docker_image!r} could not be pulled; "
+                f"build it or point docker_image at an existing image"
+            ) from exc
+        except docker.errors.DockerException as exc:
+            raise SandboxUnavailableError(
+                f"sandbox could not be provisioned: {exc}"
+            ) from exc
 
         self._container = ContainerHandle(
             container_id=container.id,

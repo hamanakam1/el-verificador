@@ -414,6 +414,16 @@ Rules:
 Every transition appends an event. The event log plus the sealed evidence is
 sufficient to re-derive the decision without re-running anything.
 
+**Diagram.** The target run lifecycle is specified in
+`docs/archify/verification-run.lifecycle.json` and rendered as an explorable
+standalone HTML artifact (Archify artifact id
+`a2d23dcd2e5f4f29a62ac9017b25c1eb`, local HTML at
+`~/.ai-dashboard/archify/artifacts/a2d23dcd2e5f4f29a62ac9017b25c1eb/diagram.html`,
+viewable in the dashboard at `http://127.0.0.1:7878/#archify`). It shows the three
+bands — verification run, guardrailed correction loop, terminal outcomes — with the
+evidence seal as the boundary before the decision. The diagram is a *target*; the
+current code's behaviour is in §2.
+
 ### 3.7 Invariants (enforced by tests, not by convention)
 
 1. **No untrusted code executes outside the sandbox.** There is no host-execution
@@ -978,7 +988,24 @@ Python sources are read now, and decoding is lenient. A missing working
 directory is also reported as such, instead of being misreported as a missing
 command.
 
-### B.5 — Two further defects recorded but not fixed here
+### B.5 — A missing sandbox image surfaced as a raw Docker 404
+
+`start()` called `client.containers.run()` unguarded. When the configured
+`docker_image` cannot be pulled, the SDK raises `docker.errors.ImageNotFound`
+and the whole verification dies with a raw HTTP traceback that says nothing
+about which image failed or what to do about it.
+
+This was found by CI rather than by a test: GitHub's runners have a Docker
+daemon, so the non-dry-run path ran for the first time, tried to pull
+`taskrivet/sandbox:latest` — the image §2.3.2 says does not exist — and
+failed the build.
+
+*Fix:* `SandboxUnavailableError` now carries an actionable message naming the
+image. The test suite no longer depends on whether the host running it has a
+Docker daemon: the daemon probe is mocked, so the result is the same on a
+laptop, in CI, and on a build host.
+
+### B.6 — Two further defects recorded but not fixed here
 
 These were found during the same pass. Both are left alone deliberately: each
 one changes what passes and what fails, which is an operator decision (§8), not

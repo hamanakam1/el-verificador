@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **A missing working directory was reported as a missing command.** The
   dry-run path now distinguishes "working directory not found" from
   "command not found".
+- **A missing sandbox image surfaced as a raw Docker 404.** `start()` now
+  raises `SandboxUnavailableError` with an actionable message naming the
+  image that could not be pulled, instead of letting the Docker SDK traceback
+  escape. The test suite no longer depends on whether the host running it
+  happens to have a Docker daemon.
 
 ### Added
 
