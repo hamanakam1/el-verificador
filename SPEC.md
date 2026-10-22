@@ -107,6 +107,37 @@ When the code passes both machine tests and the semantic intent check:
 3. Fires a cryptographically secure payload to EdgeRecord, immutably logging
    what was changed, why it was changed, and proof that it passed
 
+### 5. The Taskrivet Ledger Integration
+
+A Correction Prompt that is only printed for a human is not a feedback loop.
+The `TaskrivetAdapter` closes the loop through Taskrivet's own coordination
+ledger, so every verification outcome is a first-class lifecycle event that
+Taskrivet (and therefore the operator) can see.
+
+The adapter drives Taskrivet's JSON CLI (`python -m taskrivet`) rather than
+reimplementing its rules, so ownership, lease, scope-conflict, and token-budget
+rules stay authoritative in one place.
+
+| Verification event | Taskrivet commands | Effect on the ledger |
+|---|---|---|
+| Work begins | `task-add`, `start` | The task is seeded from the work package's acceptance contract and scope, then a session is opened under the verifier's owner |
+| An attempt fails | `fail`, `context-add`, `retry`, `start` | The failure is fingerprinted, the bounded Correction Prompt is attached as task context, the task returns to `ready`, and a fresh session owns the next attempt |
+| An attempt passes | `checkpoint`, `finish`, `accept` | Usage and evidence are recorded, the session closes, and the task is accepted |
+| The budget is exhausted | `fail` | The final failure is recorded so the task is **blocked** for human intervention instead of being left running with an abandoned session |
+
+Details that matter:
+
+- A failure always has an **owning session**. If no session is open, one is
+  opened rather than dropping the failure record silently.
+- The Correction Prompt is attached as **bounded context**, not pasted into an
+  unbounded field. Summaries, reasons, and evidence are length-capped.
+- The integration is **inert unless configured**: without both
+  `--taskrivet-db` and `--taskrivet-task` the CLI behaves exactly as before
+  and prints the prompt for the operator.
+- The adapter reads the work-package schema **defensively**. The schema
+  evolves, and a verifier that crashes on an older or newer schema would
+  report a broken gate rather than a broken build.
+
 ---
 
 ## Data Contracts
@@ -121,6 +152,12 @@ All contracts are pydantic v2 models (`extra="forbid"`):
 | `CorrectionPrompt` | Bounded prompt handed back to Taskrivet on failure, plus the optional advisory note composed by the local model |
 | `VerificationResult` | Complete result of one verification run |
 | `VerificationAudit` | Immutable EdgeRecord audit record (SHA256 hash + hash chain) |
+
+Non-contract integration surface:
+
+| Component | Purpose |
+|-------|---------|
+| `TaskrivetAdapter` | Drives Taskrivet's JSON CLI to record verification outcomes in its coordination ledger (§5) |
 
 ---
 
@@ -151,9 +188,9 @@ mode) at `~/.edgerecord/ledger.sqlite`:
 
 | Outcome | Action |
 |---------|--------|
-| `PASS` | Commit code, teardown sandbox, log to EdgeRecord |
-| `FAIL` | Issue Correction Prompt to Taskrivet (counts toward `max_retries`) |
-| `ESCALATE` | `max_retries` exhausted; pause container, flag ticket for human |
+| `PASS` | Commit code, teardown sandbox, log to EdgeRecord; checkpoint, finish, and accept the Taskrivet task |
+| `FAIL` | Issue Correction Prompt to Taskrivet (counts toward `max_retries`); record the failure, attach the prompt as context, and requeue the task |
+| `ESCALATE` | `max_retries` exhausted; pause container, flag ticket for human; record the final failure so the Taskrivet task is blocked for a human rather than left running |
 
 ---
 
@@ -164,3 +201,20 @@ python -m el_verificador verify  --work-package wp.json --repo . --base HEAD~1 -
 python -m el_verificador audit   --work-package dwp-abc --verify-chain
 python -m el_verificador config  --init
 ```
+
+With the Taskrivet ledger integration enabled:
+
+```
+python -m el_verificador verify \
+  --work-package wp.json --repo . --base HEAD~1 --head HEAD \
+  --taskrivet-db ~/.taskrivet/ledger.sqlite \
+  --taskrivet-task my-task-id \
+  --taskrivet-scope repo/api
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--taskrivet-db` | Path to the Taskrivet ledger. Required to enable the integration |
+| `--taskrivet-task` | Taskrivet task id that records this verification. Required to enable the integration |
+| `--taskrivet-owner` | Owner recorded on the Taskrivet session (default `el-verificador`) |
+| `--taskrivet-scope` | Resource key for conflict detection (repeatable) |
