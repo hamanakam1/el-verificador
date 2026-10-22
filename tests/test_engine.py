@@ -24,9 +24,9 @@ from el_verificador.schemas import (
     CheckExecution,
     CheckKind,
     CheckResult,
-    VerificationConfig,
     VerificationDecision,
 )
+from tests.support import TempStore
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "golden"
 
@@ -95,7 +95,9 @@ class _FakeDocker:
 
 class TestEngineDecisions(unittest.TestCase):
     def setUp(self):
-        self.config = VerificationConfig(dry_run=True, scope_mode="enforce")
+        self.store = TempStore()
+        self.addCleanup(self.store.cleanup)
+        self.config = self.store.config(dry_run=True, scope_mode="enforce")
         self.work_package = {
             "id": "dwp-abc",
             "true_goal": "Implement the create_user_route function",
@@ -195,10 +197,7 @@ class TestEngineDecisions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             repo, base, head, _ = _repo_for("correct_impl", tmp)
-            config = VerificationConfig(
-                dry_run=True, scope_mode="enforce",
-                evidence_root=str(tmp / "evidence"),
-            )
+            config = self.store.config(dry_run=True, scope_mode="enforce")
             verifier = ElVerificador(config, deps=verifier.deps)
             result = asyncio.run(
                 verifier.verify(self.work_package, str(repo), base, head)
@@ -230,9 +229,13 @@ class TestEngineDecisions(unittest.TestCase):
 
 
 class TestEngineEscalation(unittest.TestCase):
+    def setUp(self):
+        self.store = TempStore()
+        self.addCleanup(self.store.cleanup)
+
     def test_escalation_carries_the_evidence(self):
         """The escalation is only useful if it arrives with the failure."""
-        config = VerificationConfig(dry_run=True, max_retries=2)
+        config = self.store.config(dry_run=True, max_retries=2)
         check = CheckResult(
             kind=CheckKind.UNIT_TESTS,
             command="pytest -q",
@@ -273,8 +276,12 @@ class TestEngineEscalation(unittest.TestCase):
 
 
 class TestEngineCommitScope(unittest.TestCase):
+    def setUp(self):
+        self.store = TempStore()
+        self.addCleanup(self.store.cleanup)
+
     def test_a_pass_commits_only_the_verified_paths(self):
-        config = VerificationConfig(dry_run=False, scope_mode="enforce")
+        config = self.store.config(dry_run=False, scope_mode="enforce")
         check = CheckResult(
             kind=CheckKind.UNIT_TESTS,
             command="pytest -q",

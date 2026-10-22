@@ -432,6 +432,7 @@ class ElVerificador:
                 outcome=outcome_for_decision(result.decision.value),
                 ticket=intent.ticket,
                 actor="el-verificador",
+                work_package_id=intent.id,
                 artifacts=artifact_records(result.evidence_artifacts),
                 notes=(
                     f"work package {intent.id}: {intent.true_goal_summary}. "

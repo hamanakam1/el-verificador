@@ -34,6 +34,9 @@ dev = [
     "mypy>=1.8",
     "ruff>=0.1.0",
 ]
+mcp = [
+    "mcp>=2.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/hamanakam1/el-verificador"
@@ -42,6 +45,7 @@ Issues = "https://github.com/hamanakam1/el-verificador/issues"
 
 [project.scripts]
 el-verificador = "el_verificador.__main__:main"
+el-verificador-mcp = "el_verificador.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

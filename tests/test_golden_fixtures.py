@@ -23,6 +23,7 @@ from pathlib import Path
 
 from el_verificador.engine import ElVerificador
 from el_verificador.schemas import VerificationConfig, VerificationDecision
+from tests.support import TempStore
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "golden"
 
@@ -101,11 +102,13 @@ class TestGoldenFixtures(unittest.TestCase):
         expected = json.loads((case / "expected.json").read_text())
         work_package = json.loads((case / "work_package.json").read_text())
 
+        store = TempStore()
+        self.addCleanup(store.cleanup)
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             repo, base, head = _build_repo(tmp, case)
 
-            config = VerificationConfig(
+            config = store.config(
                 dry_run=True,
                 scope_mode=expected.get("scope_mode", "enforce"),
             )

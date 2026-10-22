@@ -81,6 +81,7 @@ def build_receipt(
     created_at: Optional[str] = None,
     ticket: Optional[str] = None,
     actor: str = "el-verificador",
+    work_package_id: Optional[str] = None,
     artifacts: Optional[List[Dict[str, Any]]] = None,
     notes: str = "",
     before_state: Optional[Dict[str, Any]] = None,
@@ -125,6 +126,8 @@ def build_receipt(
     }
     if ticket:
         receipt["ticket"] = ticket
+    if work_package_id:
+        receipt["work_package_id"] = work_package_id
 
     proof, full = fingerprint(receipt)
     receipt["proof_fingerprint"] = proof
@@ -154,6 +157,11 @@ class ReceiptChain:
 
     Each receipt names its predecessor, so the chain can be walked in either
     direction and a removed or rewritten receipt is detectable.
+
+    Ordering is by a monotonic `seq` assigned at write time, not by
+    `created_at`. The timestamp has second resolution, and a verifier that
+    writes several receipts in the same second would otherwise be ordered by
+    a random receipt id — which looks exactly like a broken chain.
     """
 
     def __init__(self, directory: str = "~/.el-verificador/receipts"):
@@ -171,9 +179,12 @@ class ReceiptChain:
         if previous is not None:
             receipt["previous_receipt_id"] = previous.get("receipt_id")
             receipt["previous_fingerprint"] = previous.get("proof_fingerprint")
-            proof, full = fingerprint(receipt)
-            receipt["proof_fingerprint"] = proof
-            receipt["full_hash"] = full
+            receipt["seq"] = int(previous.get("seq", 0)) + 1
+        else:
+            receipt["seq"] = 1
+        proof, full = fingerprint(receipt)
+        receipt["proof_fingerprint"] = proof
+        receipt["full_hash"] = full
 
         path = self.directory / f"{receipt['receipt_id']}.json"
         handle, temp_path = tempfile.mkstemp(dir=str(self.directory), suffix=".tmp")
@@ -196,7 +207,7 @@ class ReceiptChain:
                 records.append(json.loads(path.read_text()))
             except (OSError, ValueError):
                 continue
-        records.sort(key=lambda r: (r.get("created_at", ""), r.get("receipt_id", "")))
+        records.sort(key=_order_key)
         return records
 
     def last(self) -> Optional[Dict[str, Any]]:
@@ -225,6 +236,14 @@ class ReceiptChain:
 
     def for_ticket(self, ticket: str) -> List[Dict[str, Any]]:
         return [r for r in self.receipts() if r.get("ticket") == ticket]
+
+
+def _order_key(receipt: Dict[str, Any]) -> Tuple[int, int, str, str]:
+    """Order by the chain's own sequence, then by time, then by id."""
+    seq = receipt.get("seq")
+    if isinstance(seq, int):
+        return (0, seq, "", "")
+    return (1, 0, str(receipt.get("created_at", "")), str(receipt.get("receipt_id", "")))
 
 
 def outcome_for_decision(decision: str) -> str:
