@@ -121,6 +121,15 @@ account of why the tool could not complete a verification at all. §2 is the
 equivalent account of why, when it does complete one, the verdict it produces
 carries very little information.
 
+**Repairs since that assessment.** The findings in §2.2 about the semantic
+diff — `MODIFIED` never emitted, the coverage score decoupled from the code,
+`fail_on_todo_stubs` unread, and the model's Correction Prompt discarded —
+have been closed and are recorded in **Appendix D**. The findings that are not
+listed there still hold as written, including the host-execution fallback,
+the missing sandbox image, `git add -A` in the commit path, the escalation
+path dropping its evidence, and the audit trail not reaching the real
+EdgeRecord.
+
 ### 2.1 What actually works
 
 | Capability | Status |
@@ -136,11 +145,11 @@ carries very little information.
 
 | Advertised capability | Reality | Impact |
 |---|---|---|
-| **"Semantic diff" / AST change detection** | `ast_changes` only ever contains `ADDED` (and `REMOVED`). `MODIFIED` is **never emitted**: `_node_tag()` stores `"FunctionDef:name"` as the symbol's "source", so base and head are always equal and the comparison `base_sym.source != sym.source` is never true. | The diff engine cannot see a function body being rewritten — which is the single most important change in the whole exercise. |
-| **Intent coverage score** | `_intent_coverage()` unions goal words with `all_symbols`, but `all_symbols` is populated from `_scan_stubs()`, which returns only *stub* symbols. So the score is effectively "how many `related_files` did you touch", capped at 0.4. Measured: **0.1 for both a correct implementation and a stub.** | The score is decoupled from the code it claims to measure. |
-| **Intent coverage threshold (0.85)** | Referenced **0 times** in `engine.py`. `SemanticDiff.aligned` compares `coverage >= 0.0`. | The headline guardrail is dead code. A run with 0.0 coverage and no stubs is judged aligned. |
-| **`fail_on_todo_stubs` config** | Referenced **0 times** in `engine.py`. Stubs always fail, regardless of config. | Config lies. |
-| **LLM-composed Correction Prompt** | `correction.py` calls Ollama, then stores the text via `object.__setattr__(correction, "_llm_text", rendered)`. `CorrectionPrompt.render()` **never reads `_llm_text`**. The text is generated and discarded. | The Ollama dependency, the model config, and the whole "smart debugger" story produce no output. The default model `qwen2.5:14b` is not even installed locally — and nobody noticed, which is itself the proof. |
+| **"Semantic diff" / AST change detection** | `ast_changes` only ever contains `ADDED` (and `REMOVED`). `MODIFIED` is **never emitted**: `_node_tag()` stores `"FunctionDef:name"` as the symbol's "source", so base and head are always equal and the comparison `base_sym.source != sym.source` is never true. | The diff engine cannot see a function body being rewritten — which is the single most important change in the whole exercise. **Repaired — Appendix D.1.** |
+| **Intent coverage score** | `_intent_coverage()` unions goal words with `all_symbols`, but `all_symbols` is populated from `_scan_stubs()`, which returns only *stub* symbols. So the score is effectively "how many `related_files` did you touch", capped at 0.4. Measured: **0.1 for both a correct implementation and a stub.** | The score is decoupled from the code it claims to measure. **Repaired — Appendix D.2.** |
+| **Intent coverage threshold (0.85)** | Referenced **0 times** in `engine.py`. `SemanticDiff.aligned` compares `coverage >= 0.0`. | The headline guardrail is dead code. A run with 0.0 coverage and no stubs is judged aligned. **Still open — the score is repaired (D.2) but the threshold is still reported, not enforced, until the obligation model lands (Phase 2).** |
+| **`fail_on_todo_stubs` config** | Referenced **0 times** in `engine.py`. Stubs always fail, regardless of config. | Config lies. **Repaired — Appendix D.3.** |
+| **LLM-composed Correction Prompt** | `correction.py` calls Ollama, then stores the text via `object.__setattr__(correction, "_llm_text", rendered)`. `CorrectionPrompt.render()` **never reads `_llm_text`**. The text is generated and discarded. | The Ollama dependency, the model config, and the whole "smart debugger" story produce no output. The default model `qwen2.5:14b` is not even installed locally — and nobody noticed, which is itself the proof. **Repaired — Appendix D.4.** The note is now advisory and labelled as such. |
 | **"Fires a cryptographically secure payload to EdgeRecord"** | Writes to `~/.edgerecord/ledger.sqlite`, a SQLite table invented by this repo. **The real EdgeRecord is file-based**: git-tracked JSON receipts in `receipts/`, fingerprinted per `RUN_ERA.md` "Canonical hashing" (recursively key-sorted, compact-separator, `ensure_ascii=False`, SHA-256), chained by `previous_fingerprint`, verified by `playbooks/verify-chain.py`, and enforced by a pre-commit hook. | The audit trail is **not in the system of record**. `el-destilador` has the same defect — it will need a parallel fix, but El Verificador should not compound it. |
 | **"Flags the ticket on the Ticket Board"** | No ticket-board integration exists in the codebase. | The escalation path terminates in a local variable. |
 
@@ -1071,14 +1080,105 @@ python scripts/capture_screenshots.py
 
 Two things the captures make visible that prose does not:
 
-1. **The intent-coverage score reads `0.30` against a configured threshold of
-   `0.85`, and the run still passes.** This is §2.2 and §2.3 in one image: the
-   metric is capped at `0.4` because it is computed from stub symbols rather
-   than from the code, and the threshold is never consulted. Until Phase 2
-   replaces the score with obligations, a green `verify` means *"the acceptance
-   commands exited zero and no stub pattern was matched"* — not *"the intent was
-   fulfilled"*.
+1. **The intent-coverage score reads `1.00`, and the run passes.** Before the
+   Appendix D repairs this number was `0.30` — it was computed from stub
+   symbols rather than from the code, and it could not tell a correct
+   implementation from a stub. It is now computed from the identifiers the
+   goal names, and it is reported with its inputs. The configured threshold of
+   `0.85` is still not enforced, so a green `verify` still means *"the
+   acceptance commands exited zero, no stub was found, and the change provides
+   something the goal named"* — not *"the intent was fulfilled"*. Until Phase 2
+   replaces the score with obligations, that is the honest reading.
 2. **The three-attempt escalation is real.** The CLI's retry hook prints the
    Correction Prompt rather than dispatching it to an agent, so the same
    failure is re-measured three times and the loop breaks. That is the
    containment guarantee working, and it is also why Phase 3 exists.
+
+## Appendix D — Defects confirmed and fixed in the semantic-diff layer
+
+The §2 assessment was made against `a1100cf` and re-verified against `56edd17`.
+This appendix records the findings in §2.2 that have since been closed, with
+the measurement that shows each one is closed. Everything in §2.2 that is not
+listed here still holds as written.
+
+**D.1 — `MODIFIED` was never emitted (`semantic_diff.py`)**
+
+`_node_tag()` stored the string `"FunctionDef:name"` as a symbol's *source*, so
+the base and head copies of the same symbol were always equal and the
+comparison `base_sym.source != sym.source` could never be true. The diff engine
+could not see a function body being rewritten — the single most important
+change in the whole exercise.
+
+*Fix:* symbols now carry their real source segment, and they are matched by
+kind and qualified name, so `A.render` and `B.render` are not confused for
+each other. A rewritten body is reported as `MODIFIED` with the old and new
+source, bounded to 2,000 characters each.
+
+**D.2 — The coverage score measured the wrong thing (`semantic_diff.py`)**
+
+`_intent_coverage()` unioned the goal words with `all_symbols`, but
+`all_symbols` was populated from `_scan_stubs()`, which returns only *stub*
+symbols. For clean code the set was empty, so the score was "how many
+`related_files` did you touch", capped at 0.4 — measured at 0.1 for a correct
+implementation and 0.1 for a stub.
+
+*Fix:* the score is now the weighted combination of the declared scope that was
+touched and the goal's **checkable claims** — the identifiers the goal names
+(`register_user`, `validate_payload`, `app/routes/users.py`), compared token by
+token against the names and bodies of the changed symbols. Prose is excluded
+from the denominator, because "implement", "add", and "new" cannot be checked
+against code and would only make the score depend on how the goal was worded.
+A goal that names no identifiers falls back to its significant words, and the
+basis says which was used.
+
+Measured on the demo fixture: **1.00 for the implementation, 0.36 for the
+stub** that omits three of the five named functions. The score is reported
+with its inputs — goal words, covered words, uncovered words, the identifiers
+the goal named, and the related files that were touched — and the audit record
+carries the same evidence.
+
+**D.2b — A change that ignored the goal entirely could still pass (`engine.py`)**
+
+The acceptance commands can all exit zero while the agent edits something
+unrelated. With the score unable to see intent, nothing caught that.
+
+*Fix:* a third rule, independent of the score: if the goal names identifiers
+and the change provides **none** of them, verification fails. The rule has no
+false positives — a change that contains none of the things the goal asked for
+is not an attempt at the goal.
+
+**D.3 — `fail_on_todo_stubs` was never read (`engine.py`)**
+
+The config option existed and was documented, and was referenced zero times in
+`engine.py`. Stubs always failed, regardless of the setting.
+
+*Fix:* the option is honoured. The default remains `true`, so the decision
+behaviour is unchanged.
+
+**D.4 — The model's Correction Prompt was generated and thrown away
+(`correction.py`, `schemas.py`)**
+
+`correction.py` called Ollama, then stored the text with
+`object.__setattr__(correction, "_llm_text", rendered)` — smuggling a field
+past `extra="forbid"`. `CorrectionPrompt.render()` never read it, so the
+generated text never reached Taskrivet.
+
+*Fix:* `llm_text` is a real field on the contract, and `render()` includes it
+in a clearly labelled *Advisor's Note* section, after the deterministic
+evidence and before the required action. It is advisory: the decision was made
+from the evidence, and the note cannot change it.
+
+**What did not change.** The `intent_coverage_threshold` of 0.85 is still
+reported rather than enforced. The score now measures what it claims to
+measure, and it separates a faithful implementation from a stub by a wide
+margin, but it has not been calibrated against a population of real work
+packages, and a correct implementation that spells a name differently would
+score lower than the threshold. Phase 2 replaces the score with obligations;
+until that lands, the honest reading of a green `verify` is still *"the
+acceptance commands exited zero, no stub was found, and the change provides
+something the goal named"* — not *"the intent was fulfilled"*.
+
+**Still open, unchanged:** the host-execution fallback in dry-run (§2.3.1), the
+missing sandbox image (§2.3.2), `git add -A` in the commit path (§2.3.3), the
+escalation path dropping its evidence (§2.3.4), and the audit trail not being
+written to the real EdgeRecord (§2.2).

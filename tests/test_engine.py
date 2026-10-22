@@ -131,6 +131,69 @@ class TestEngineDryRun(unittest.TestCase):
         self.assertEqual(result.decision, VerificationDecision.FAIL)
         self.assertFalse(result.passed)
 
+    def test_fail_when_the_goal_names_identifiers_the_change_does_not_provide(self):
+        """A change that provides none of the named things is not an attempt.
+
+        The acceptance commands can all exit zero while the agent edits
+        something else entirely. The names the goal asked for are the one
+        signal that catches it.
+        """
+        unrelated = SemanticDiff(
+            repo_path="/tmp/repo",
+            base_commit="a" * 40,
+            head_commit="b" * 40,
+            files_changed=["app/other.py"],
+            added_lines=3,
+            removed_lines=0,
+            ast_changes=[],
+            intent_coverage=0.0,
+            has_todo_stubs=False,
+            stub_symbols=[],
+            goal_tokens=["login", "route"],
+            covered_tokens=[],
+            uncovered_tokens=["login", "route"],
+            named_identifiers=["login_route"],
+        )
+        verifier, docker = self._make_verifier([self.pass_check])
+        with patch(
+            "el_verificador.engine.SemanticDiffEngine"
+        ) as mock_engine:
+            instance = mock_engine.return_value
+            instance.compute.return_value = unrelated
+            result = self._run_verify(
+                verifier, self.work_package, "/tmp/repo", "a" * 40, "b" * 40
+            )
+        self.assertEqual(result.decision, VerificationDecision.FAIL)
+        self.assertFalse(result.passed)
+
+    def test_fail_on_todo_stubs_can_be_switched_off(self):
+        """The config option is honoured rather than ignored."""
+        config = VerificationConfig(dry_run=True, fail_on_todo_stubs=False)
+        stubbed = SemanticDiff(
+            repo_path="/tmp/repo",
+            base_commit="a" * 40,
+            head_commit="b" * 40,
+            files_changed=["app/auth.py"],
+            added_lines=3,
+            removed_lines=0,
+            ast_changes=[],
+            intent_coverage=0.5,
+            has_todo_stubs=True,
+            stub_symbols=["login"],
+        )
+        docker = _FakeDocker([self.pass_check])
+        deps = VerifierDependencies(docker=docker, git=MagicMock(), ollama=MagicMock())
+        verifier = ElVerificador(config, deps=deps)
+        with patch(
+            "el_verificador.engine.SemanticDiffEngine"
+        ) as mock_engine:
+            instance = mock_engine.return_value
+            instance.compute.return_value = stubbed
+            result = self._run_verify(
+                verifier, self.work_package, "/tmp/repo", "a" * 40, "b" * 40
+            )
+        self.assertEqual(result.decision, VerificationDecision.PASS)
+
 
 if __name__ == "__main__":
     unittest.main()
