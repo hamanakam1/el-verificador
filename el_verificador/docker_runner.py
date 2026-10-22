@@ -36,7 +36,11 @@ class DockerRunner:
     def __init__(self, config: VerificationConfig):
         self.config = config
         self._container: Optional[ContainerHandle] = None
-        self._docker_available: Optional[bool] = None
+        # NOTE: the cache attribute must not share a name with the
+        # `_docker_available()` method below, or the instance attribute
+        # shadows the method and every non-dry-run call raises
+        # `TypeError: 'NoneType' object is not callable`.
+        self._docker_ok: Optional[bool] = None
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -44,11 +48,12 @@ class DockerRunner:
     def start(self, repo_path: str) -> ContainerHandle:
         """Provision the sandbox container with the repo mounted as a volume."""
         if self.config.dry_run or not self._docker_available():
-            return ContainerHandle(
+            self._container = ContainerHandle(
                 container_id="dry-run",
                 image=self.config.docker_image,
                 workdir=str(Path(repo_path).resolve()),
             )
+            return self._container
 
         import docker
 
@@ -103,13 +108,24 @@ class DockerRunner:
             import shlex
             import subprocess
 
+            workdir = self._container.workdir if self._container else None
+            if workdir and not Path(workdir).is_dir():
+                return CheckResult(
+                    kind=kind,
+                    command=command,
+                    exit_code=127,
+                    stdout="",
+                    stderr=f"working directory not found: {workdir}",
+                    duration_ms=int((time.time() - start) * 1000),
+                )
+
             try:
                 proc = subprocess.run(
                     shlex.split(command),
                     capture_output=True,
                     text=True,
                     timeout=self.config.docker_timeout,
-                    cwd=self._container.workdir if self._container else None,
+                    cwd=workdir,
                 )
                 exit_code = proc.returncode
                 stdout = proc.stdout
@@ -175,14 +191,14 @@ class DockerRunner:
     # Helpers
     # ------------------------------------------------------------------ #
     def _docker_available(self) -> bool:
-        if self._docker_available is not None:
-            return self._docker_available
+        if self._docker_ok is not None:
+            return self._docker_ok
         try:
             import docker  # noqa: F401
 
             client = docker.from_env()
             client.ping()
-            self._docker_available = True
+            self._docker_ok = True
         except Exception:
-            self._docker_available = False
-        return self._docker_available
+            self._docker_ok = False
+        return self._docker_ok

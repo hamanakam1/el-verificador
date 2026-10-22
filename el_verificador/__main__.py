@@ -109,7 +109,7 @@ async def cmd_verify(args: argparse.Namespace, config: VerificationConfig) -> in
         taskrivet_retry=taskrivet_retry,
     )
 
-    print(json.dumps(result.model_dump(mode="json", indent=2), indent=2))
+    print(json.dumps(result.model_dump(mode="json"), indent=2))
     return 0 if result.passed else 1
 
 

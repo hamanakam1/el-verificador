@@ -66,6 +66,13 @@ class SemanticDiffEngine:
         for change in file_changes:
             if change.status == "D":
                 continue
+            # Only Python sources are AST-parsed. Reading every changed file
+            # would (a) waste time and (b) crash on binary artifacts such as
+            # compiled bytecode or images, which is not a verification
+            # failure but an unhandled decoder error.
+            if not change.path.endswith(".py"):
+                continue
+
             head_source = self._read_file_at(self.head_commit, change.path)
             base_source = (
                 self._read_file_at(self.base_commit, change.path)
@@ -73,13 +80,12 @@ class SemanticDiffEngine:
                 else ""
             )
 
-            if change.path.endswith(".py"):
-                ast_changes.extend(
-                    self._compare_ast(change.path, base_source, head_source)
-                )
-                stubs, symbols = self._scan_stubs(head_source)
-                todo_stubs.extend(stubs)
-                all_symbols.update(symbols)
+            ast_changes.extend(
+                self._compare_ast(change.path, base_source, head_source)
+            )
+            stubs, symbols = self._scan_stubs(head_source)
+            todo_stubs.extend(stubs)
+            all_symbols.update(symbols)
 
         coverage = self._intent_coverage(intent, all_symbols, file_changes)
 
@@ -112,6 +118,7 @@ class SemanticDiffEngine:
                 ],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 cwd=self.repo_path,
                 timeout=30,
             )
@@ -139,6 +146,7 @@ class SemanticDiffEngine:
                 ["git", "show", f"{commit}:{path}"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 cwd=self.repo_path,
                 timeout=15,
             )
