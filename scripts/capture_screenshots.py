@@ -231,10 +231,14 @@ VERIFY_CMD = [
     "--base", "HEAD~1",
     "--head", "HEAD",
     "--config", "verificador.yaml",
+    # The demo repository is a synthetic fixture, and there is no Docker
+    # daemon on the capture machine. The flag makes the host execution an
+    # explicit, visible decision instead of a silent fallback.
+    "--allow-host-execution",
 ]
 
 PASS_FILTER = """{
-  decision, passed, committed, edge_record_payload_hash,
+  decision, passed, committed, commit_note, edge_record_payload_hash,
   checks: [.check_results[] | {
     kind, command, exit_code, passed: (.exit_code == 0)
   }],

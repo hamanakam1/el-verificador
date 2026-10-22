@@ -35,6 +35,16 @@ def create_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument(
         "--dry-run", action="store_true", help="Skip Docker/git/EdgeRecord writes"
     )
+    verify_parser.add_argument(
+        "--allow-host-execution",
+        action="store_true",
+        help=(
+            "Permit the acceptance commands to run on this machine when no "
+            "sandbox is available. The repository under test contains code the "
+            "agent wrote, and running it here executes that code with your "
+            "credentials. Off by default."
+        ),
+    )
 
     add_taskrivet_arguments(verify_parser)
 
@@ -70,6 +80,8 @@ async def main() -> int:
                     setattr(config, k, v)
     if getattr(args, "dry_run", False):
         config.dry_run = True
+    if getattr(args, "allow_host_execution", False):
+        config.allow_host_execution = True
 
     if not hasattr(args, "command") or not args.command:
         parser.print_help()

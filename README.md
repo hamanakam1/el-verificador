@@ -124,26 +124,32 @@ of *what was decided and why* cannot be quietly rewritten:
 
 **Alpha — the core loop runs; the pipeline is not yet connected.**
 
-Implemented and tested (26 tests green): the data contracts, the Docker sandbox
+Implemented and tested (96 tests green): the data contracts, the Docker sandbox
 runner, the AST semantic diff, the guardrailed retry loop, git commit +
 teardown, and the hash-chained audit ledger. The verification cycle has run
 end-to-end against a real repository — see the screenshots above.
 
-Four defects that prevented that from being true are fixed in this change set
-and recorded in [ROADMAP.md](ROADMAP.md) Appendix B: every non-dry-run
+Defects that prevented that from being true are fixed and recorded in
+[ROADMAP.md](ROADMAP.md) Appendices B, D, E, F, and G: every non-dry-run
 verification crashed on a shadowed method, the primary CLI command crashed on
-its JSON serialisation, dry-run checks ran in the wrong directory, and the
-semantic diff crashed on binary files in the diff.
+its JSON serialisation, dry-run checks ran in the wrong directory, the
+semantic diff crashed on binary files in the diff, the semantic diff could not
+see a rewritten function body, the coverage score measured the wrong thing, the
+commit path staged the whole working tree, the escalation path discarded its
+evidence, the audit hash did not cover the evidence it claimed to protect, and
+the retry loop spent its budget on an unchanged repository.
 
 **Known gaps, all tracked in [ROADMAP.md](ROADMAP.md):**
 
 - Taskrivet dispatch, Ticket Board escalation, and a canonical EdgeRecord
   receipt do not exist yet. `ESCALATE` is currently a return value, not an
   escalation.
-- The intent-coverage score is not yet a valid gate: it is structurally capped
-  at `0.4` while the configured threshold is `0.85`, and the threshold is not
-  currently enforced. Fixing the metric changes what passes and what fails, so
-  it is called out as an operator decision rather than done silently.
+- The intent-coverage score is now measured against the identifiers the goal
+  names and is reported with its inputs, but the configured threshold is still
+  not enforced: the score has not been calibrated against a population of real
+  work packages, and a correct implementation that spells a name differently
+  would score below it. It is called out as an operator decision rather than
+  done silently.
 - The EdgeRecord audit record is written to a local SQLite ledger
   (`~/.edgerecord/ledger.sqlite`), not to a canonical EdgeRecord receipt.
 
@@ -187,6 +193,26 @@ python -m el_verificador verify \
 # 3. Check the audit trail
 python -m el_verificador audit --verify-chain
 ```
+
+### Where the checks run
+
+Acceptance checks run inside the Docker sandbox. When there is no sandbox —
+Docker is not running, or `--dry-run` is set — the checks are **not** run on
+your machine by default, because the repository under test contains code the
+agent wrote, and running its test suite there executes that code with your
+credentials, in your working tree, with your network. A `conftest.py` is
+arbitrary code, and pytest imports it before the tests run.
+
+The check is refused with an explanation, and the verification fails closed.
+If you trust the repository and accept that its test code will run on your
+machine, say so:
+
+```bash
+python -m el_verificador verify ... --allow-host-execution
+```
+
+or set `allow_host_execution: true` in the configuration. Start the Docker
+daemon to run the checks in the sandbox instead.
 
 ## Verification Cycle
 

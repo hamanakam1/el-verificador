@@ -631,6 +631,13 @@ class VerificationConfig(BaseModel):
     # Dry-run: skip Docker/git/EdgeRecord writes for offline testing
     dry_run: bool = False
 
+    # Running the acceptance commands on the host executes code that came
+    # from the repository under test — a `conftest.py` is arbitrary code, and
+    # it would run with the operator's credentials, in the operator's working
+    # tree, with the operator's network. That is only acceptable when the
+    # operator has said so, in the configuration or on the command line.
+    allow_host_execution: bool = False
+
     def __post_init__(self):  # type: ignore[override]
         import os
         self.edgerecord_db = os.path.expanduser(self.edgerecord_db)

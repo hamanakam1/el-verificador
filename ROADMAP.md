@@ -1302,11 +1302,44 @@ written in.
 *Fix:* the chain follows insertion order, and a test covers two records with
 the same timestamp.
 
-**Still open, unchanged:** the host-execution fallback in dry-run (§2.3.1), the
-missing sandbox image (§2.3.2), and the audit trail still being written to a
-SQLite table this repository invented rather than to the real EdgeRecord
-(§2.2). The local ledger is the tool's own; it is not yet the system of
-record.
+**Still open, unchanged:** the missing sandbox image (§2.3.2), and the audit
+trail still being written to a SQLite table this repository invented rather
+than to the real EdgeRecord (§2.2). The local ledger is the tool's own; it is
+not yet the system of record.
+
+---
+
+## Appendix H — The host is no longer a silent fallback for the sandbox
+
+**H.1 — Dry-run executed untrusted code on the host (§2.3.1)**
+
+`DockerRunner.run_check()` fell back to `subprocess.run(command, cwd=repo)`
+whenever Docker was unavailable or `dry_run` was set. The repository under
+test holds code the agent wrote, and running its test suite there executes
+that code with the operator's credentials, in the operator's working tree,
+with the operator's network. A `conftest.py` is arbitrary code, and pytest
+imports it before the tests run. `dry_run` was documented as the mode the
+README's own Quick Start used.
+
+*Fix:* the host fallback is **opt-in**. `allow_host_execution` in the
+configuration, or `--allow-host-execution` on the command line, is what
+authorises it. Without it the check is refused with exit code `125` — the
+conventional "could not be executed", distinct from a test failure — and the
+message says whether Docker is unavailable or this is dry-run mode, and what
+to do about it. The verification fails closed.
+
+This is a guard, not the Phase 1 answer. Phase 1 replaces the fallback with a
+real, digest-pinned sandbox and a real acceptance contract; this change makes
+the hole impossible to fall into by accident in the meantime.
+
+The refusal and the opt-in are covered by tests: a repository whose
+`conftest.py` writes to the host leaves no trace when the check is refused,
+and does leave one when the operator explicitly allows it.
+
+**Still open, unchanged:** the missing sandbox image (§2.3.2) — the sandbox
+still has to be built and published, and until it is, the checks run nowhere
+rather than on the host — and the audit trail not being written to the real
+EdgeRecord (§2.2).
 
 ---
 
