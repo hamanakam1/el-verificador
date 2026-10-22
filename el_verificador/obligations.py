@@ -65,6 +65,7 @@ class ObligationKind(str, Enum):
     SCOPE_RESPECTED = "scope_respected"
     SYMBOL_PRESENT = "symbol"
     GOAL_TERMS_PRESENT = "goal_terms"
+    BEHAVIOR_DEMONSTRATED = "behavior_demonstrated"
 
 
 class ObligationStatus(str, Enum):
@@ -183,12 +184,22 @@ def _symbol_names(diff: SemanticDiff) -> Set[str]:
 class ObligationEvaluator:
     """Builds and resolves the obligation set for one verification attempt."""
 
-    def __init__(self, scope_mode: str = "warn", goal_terms_enforced: bool = True):
+    def __init__(
+        self,
+        scope_mode: str = "warn",
+        goal_terms_enforced: bool = True,
+        behavior_mode: str = "warn",
+    ):
         # "off" | "warn" | "enforce"
         if scope_mode not in ("off", "warn", "enforce"):
             raise ValueError(f"scope_mode must be off, warn or enforce; got {scope_mode!r}")
+        if behavior_mode not in ("off", "warn", "enforce"):
+            raise ValueError(
+                f"behavior_mode must be off, warn or enforce; got {behavior_mode!r}"
+            )
         self.scope_mode = scope_mode
         self.goal_terms_enforced = goal_terms_enforced
+        self.behavior_mode = behavior_mode
 
     # ------------------------------------------------------------------ #
     def evaluate(
@@ -206,6 +217,7 @@ class ObligationEvaluator:
         obligations.extend(self._scope_respected(intent, diff))
         obligations.extend(self._symbol_present(intent, diff))
         obligations.extend(self._goal_terms(intent, diff))
+        obligations.extend(self._behavior_demonstrated(diff))
         return obligations
 
     # ------------------------------------------------------------------ #
@@ -469,6 +481,74 @@ class ObligationEvaluator:
                 statement="The change addresses the terms of the distilled goal",
                 status=ObligationStatus.SATISFIED,
                 detail=f"goal term(s) not found in the change: {', '.join(unmatched)}",
+            )
+        ]
+
+    def _behavior_demonstrated(self, diff: SemanticDiff) -> List[Obligation]:
+        """A new public symbol with no test alongside it.
+
+        The check is deliberately conservative: it only fires when the change
+        added a *public* symbol and touched no test file at all. A rename, a
+        constant, a private helper and an extended existing test all leave it
+        quiet, because a gate that cries wolf gets switched off.
+        """
+        if self.behavior_mode == "off":
+            return [
+                Obligation(
+                    id="behavior_demonstrated",
+                    kind=ObligationKind.BEHAVIOR_DEMONSTRATED,
+                    statement="New behaviour is covered by a test",
+                    status=ObligationStatus.NOT_APPLICABLE,
+                    detail="the behaviour check is disabled",
+                )
+            ]
+
+        new_symbols = [
+            change.name
+            for change in diff.ast_changes
+            if change.change_type.value == "added"
+            and not change.name.startswith("_")
+        ]
+        touched_tests = any(
+            self._is_test_path(path) for path in diff.files_changed
+        )
+
+        if not new_symbols or touched_tests:
+            return [
+                Obligation(
+                    id="behavior_demonstrated",
+                    kind=ObligationKind.BEHAVIOR_DEMONSTRATED,
+                    statement="New behaviour is covered by a test",
+                    status=ObligationStatus.SATISFIED,
+                    detail=(
+                        "the change touched a test file"
+                        if touched_tests
+                        else "the change added no public symbol"
+                    ),
+                )
+            ]
+
+        detail = (
+            "new public symbol(s) with no test alongside them: "
+            + ", ".join(sorted(new_symbols)[:5])
+        )
+        if self.behavior_mode == "warn":
+            return [
+                Obligation(
+                    id="behavior_demonstrated",
+                    kind=ObligationKind.BEHAVIOR_DEMONSTRATED,
+                    statement="New behaviour is covered by a test",
+                    status=ObligationStatus.SATISFIED,
+                    detail="WARNING: " + detail,
+                )
+            ]
+        return [
+            Obligation(
+                id="behavior_demonstrated",
+                kind=ObligationKind.BEHAVIOR_DEMONSTRATED,
+                statement="New behaviour is covered by a test",
+                status=ObligationStatus.VIOLATED,
+                detail=detail,
             )
         ]
 

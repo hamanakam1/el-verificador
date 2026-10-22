@@ -51,6 +51,14 @@ fail_on_todo_stubs: true
 # How a change outside the work package's related_files is treated:
 # "off" | "warn" (reported, not blocking) | "enforce" (blocking)
 scope_mode: "warn"
+# Whether a change that shares no vocabulary with the distilled goal blocks
+# a pass. The check is lexical, so a goal written in abstractions can fail a
+# correct change. Turn it off without a code change if that starts happening.
+goal_terms_enforced: true
+# "off" | "warn" | "enforce" -- how a new public symbol with no test
+# alongside it is treated. Defaults to warn: the check is conservative, and a
+# gate that cries wolf gets switched off.
+behavior_mode: "warn"
 
 # Git
 commit_branch: "main"

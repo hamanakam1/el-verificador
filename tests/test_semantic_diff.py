@@ -254,6 +254,34 @@ class TestTestWeakeningDetection(unittest.TestCase):
         self.assertEqual(diff.weakened_tests, [])
 
 
+class TestUnresolvableCommits(unittest.TestCase):
+    """A commit that does not exist must not look like "nothing changed"."""
+
+    def setUp(self):
+        self.repo = _Repo()
+        self.addCleanup(self.repo.cleanup)
+
+    def test_a_missing_base_commit_is_an_error(self):
+        self.repo.write("app.py", "def keeper():\n    return 1\n")
+        head = self.repo.commit("head")
+        with self.assertRaises(ValueError) as ctx:
+            self.repo.diff("0" * 40, head)
+        self.assertIn("base", str(ctx.exception))
+
+    def test_a_missing_head_commit_is_an_error(self):
+        self.repo.write("app.py", "def keeper():\n    return 1\n")
+        base = self.repo.commit("base")
+        with self.assertRaises(ValueError) as ctx:
+            self.repo.diff(base, "0" * 40)
+        self.assertIn("head", str(ctx.exception))
+
+    def test_an_empty_commit_is_an_error(self):
+        self.repo.write("app.py", "def keeper():\n    return 1\n")
+        head = self.repo.commit("head")
+        with self.assertRaises(ValueError):
+            self.repo.diff("", head)
+
+
 class TestDiffRobustness(unittest.TestCase):
     def setUp(self):
         self.repo = _Repo()

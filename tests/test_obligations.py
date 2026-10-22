@@ -300,6 +300,96 @@ class TestObligationEvaluation(unittest.TestCase):
             ObligationEvaluator(scope_mode="sometimes")
 
 
+class TestBehaviourObligation(unittest.TestCase):
+    """A new public symbol with no test is reported, not blocked by default."""
+
+    def setUp(self):
+        self.evaluator = ObligationEvaluator(behavior_mode="warn")
+
+    def _by_id(self, obligations):
+        return {o.id: o for o in obligations}
+
+    def _diff(self, **kwargs):
+        base = dict(
+            repo_path="/tmp/repo",
+            base_commit="a" * 40,
+            head_commit="b" * 40,
+            files_changed=["app/api.py"],
+            ast_changes=[
+                {
+                    "change_type": "added",
+                    "symbol_kind": "function",
+                    "name": "create_user_route",
+                    "file_path": "app/api.py",
+                    "line_no": 1,
+                    "after": "def create_user_route():\n    return 1",
+                }
+            ],
+        )
+        base.update(kwargs)
+        return SemanticDiff(**base)
+
+    def test_a_new_symbol_with_no_test_is_reported(self):
+        obligations = self.evaluator.evaluate(
+            _intent(), self._diff(), [_passing_check()]
+        )
+        by_id = self._by_id(obligations)
+        self.assertEqual(
+            by_id["behavior_demonstrated"].status, ObligationStatus.SATISFIED
+        )
+        self.assertIn("WARNING", by_id["behavior_demonstrated"].detail)
+
+    def test_it_blocks_when_enforced(self):
+        evaluator = ObligationEvaluator(behavior_mode="enforce")
+        obligations = evaluator.evaluate(
+            _intent(), self._diff(), [_passing_check()]
+        )
+        by_id = self._by_id(obligations)
+        self.assertEqual(
+            by_id["behavior_demonstrated"].status, ObligationStatus.VIOLATED
+        )
+
+    def test_a_change_that_touched_a_test_is_quiet(self):
+        diff = self._diff(files_changed=["app/api.py", "tests/test_api.py"])
+        obligations = self.evaluator.evaluate(
+            _intent(), diff, [_passing_check()]
+        )
+        by_id = self._by_id(obligations)
+        self.assertEqual(
+            by_id["behavior_demonstrated"].status, ObligationStatus.SATISFIED
+        )
+        self.assertNotIn("WARNING", by_id["behavior_demonstrated"].detail)
+
+    def test_a_private_helper_is_quiet(self):
+        diff = self._diff(
+            ast_changes=[
+                {
+                    "change_type": "added",
+                    "symbol_kind": "function",
+                    "name": "_helper",
+                    "file_path": "app/api.py",
+                    "line_no": 1,
+                    "after": "def _helper():\n    return 1",
+                }
+            ]
+        )
+        obligations = self.evaluator.evaluate(
+            _intent(), diff, [_passing_check()]
+        )
+        by_id = self._by_id(obligations)
+        self.assertNotIn("WARNING", by_id["behavior_demonstrated"].detail)
+
+    def test_it_can_be_switched_off(self):
+        evaluator = ObligationEvaluator(behavior_mode="off")
+        obligations = evaluator.evaluate(
+            _intent(), self._diff(), [_passing_check()]
+        )
+        by_id = self._by_id(obligations)
+        self.assertEqual(
+            by_id["behavior_demonstrated"].status, ObligationStatus.NOT_APPLICABLE
+        )
+
+
 class TestIntentHelpers(unittest.TestCase):
     def test_plural_spellings_match(self):
         """A goal saying "returns" must match code saying "return"."""

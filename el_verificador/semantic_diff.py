@@ -92,6 +92,7 @@ class SemanticDiffEngine:
     # Entry point
     # ------------------------------------------------------------------ #
     def compute(self, intent: IntentPackage) -> SemanticDiff:
+        self._assert_commits_resolve()
         file_changes = self._changed_files()
         ast_changes: List[ASTChange] = []
         stub_symbols: List[str] = []
@@ -145,6 +146,27 @@ class SemanticDiffEngine:
     # ------------------------------------------------------------------ #
     # Git
     # ------------------------------------------------------------------ #
+    def _assert_commits_resolve(self) -> None:
+        """Fail loudly when a commit does not exist.
+
+        A base commit that does not resolve produces an empty diff, and an
+        empty diff looks exactly like "the agent changed nothing" — a verdict
+        that is safe but wrong, and one that burns an agent attempt for no
+        reason. Say what is actually wrong.
+        """
+        for label, commit in (
+            ("base", self.base_commit),
+            ("head", self.head_commit),
+        ):
+            if not commit:
+                raise ValueError(f"the {label} commit was not given")
+            result = self._git(["rev-parse", "--verify", f"{commit}^{{commit}}"])
+            if result.returncode != 0:
+                raise ValueError(
+                    f"the {label} commit {commit!r} does not exist in "
+                    f"{self.repo_path}"
+                )
+
     def _changed_files(self) -> List[_FileChange]:
         """Changed files with their status, from git itself."""
         status_by_path: Dict[str, str] = {}

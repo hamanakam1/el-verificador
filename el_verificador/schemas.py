@@ -780,6 +780,9 @@ class VerificationConfig(BaseModel):
     # ("refactor the boundaries for clarity") can fail a correct change.
     # Turn it off without a code change if that starts happening.
     goal_terms_enforced: bool = True
+    # "off" | "warn" | "enforce" — how a new public symbol with no test
+    # alongside it is treated.
+    behavior_mode: str = "warn"
 
     # Git
     commit_branch: str = "main"
