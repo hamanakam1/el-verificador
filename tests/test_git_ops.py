@@ -112,6 +112,49 @@ class TestCommitScope(_RepoTestCase):
                 "verified", "main", paths=["app.py"], expected_head=verified
             )
 
+    def test_a_clean_tree_can_be_moved_to_the_target_branch(self):
+        """The verified change is in the working tree, not yet committed."""
+        self._git("checkout", "-q", "-b", "feature")
+        self._write("app.py", "VALUE = 9\n")
+
+        outcome = self.ops.commit("verified", "main", paths=["app.py"])
+        self.assertEqual(outcome.status, "committed")
+        self.assertEqual(
+            self._git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "main"
+        )
+        self.assertEqual(
+            self._git("show", "HEAD:app.py").stdout.strip(), "VALUE = 9"
+        )
+
+    def test_a_dirty_tree_is_not_moved_to_another_branch(self):
+        """Another session's work in the tree is not ours to carry."""
+        self._git("checkout", "-q", "-b", "feature")
+        self._write("app.py", "VALUE = 10\n")
+        self._write("other.py", "VALUE = 1\n")
+        self._git("add", "app.py", "other.py")
+        self._git("commit", "-q", "-m", "work")
+        # Another session edits a tracked file the verification did not review.
+        self._write("other.py", "VALUE = 11\n")
+
+        with self.assertRaises(CommitRefused) as caught:
+            self.ops.commit("verified", "main", paths=["app.py"])
+        self.assertIn("did not review", str(caught.exception))
+        # The tree is still where it was, and its content is untouched.
+        self.assertEqual(
+            self._git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip(), "feature"
+        )
+        self.assertEqual(
+            self.path.joinpath("other.py").read_text().strip(), "VALUE = 11"
+        )
+
+    def test_untracked_files_do_not_block_a_branch_switch(self):
+        self._git("checkout", "-q", "-b", "feature")
+        self._write("app.py", "VALUE = 12\n")
+        self._write("untracked.md", "notes\n")
+        outcome = self.ops.commit("verified", "main", paths=["app.py"])
+        self.assertEqual(outcome.status, "committed")
+        self.assertTrue((self.path / "untracked.md").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

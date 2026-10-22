@@ -213,8 +213,17 @@ Non-contract integration surface:
 
 ## EdgeRecord Audit
 
-Every verification decision is written to the EdgeRecord SQLite ledger (WAL
-mode) at `~/.edgerecord/ledger.sqlite`:
+Every verification decision is written to the verifier's audit ledger (WAL
+mode). The default is `~/.el-verificador/ledger.sqlite`, and
+`EL_VERIFICADOR_DB` overrides it. Both the `verify` and the `audit` command
+resolve the path the same way, so a writer and a reader can never disagree
+about where the record is.
+
+The default is deliberately **not** the real EdgeRecord's store. That store
+belongs to another component and is file-based; writing a table into it
+would put this tool's records somewhere the rest of the factory cannot find
+and would corrupt a file it does not own. The audit trail is not yet in the
+system of record — see `ROADMAP.md` Phase 4.
 
 - Content hash = SHA256 over the canonical JSON of the whole decision — the
   work package, the repository, the decision, the rationale, **the key

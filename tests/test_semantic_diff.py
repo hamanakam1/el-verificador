@@ -425,6 +425,13 @@ class TestWordHandling(unittest.TestCase):
         self.assertEqual(_stem("returns"), _stem("return"))
         self.assertEqual(_stem("rendering"), _stem("render"))
 
+    def test_a_singular_and_its_plural_share_a_stem(self):
+        """"route" and "routes" are the same claim, not two."""
+        self.assertEqual(_stem("route"), _stem("routes"))
+        self.assertEqual(_stem("match"), _stem("matches"))
+        self.assertEqual(_stem("class"), _stem("classes"))
+        self.assertEqual(_stem("query"), _stem("queries"))
+
     def test_stop_words_are_not_significant(self):
         self.assertNotIn("the", _significant_words("the result of the query"))
         self.assertIn("result", _significant_words("the result of the query"))

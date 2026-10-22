@@ -153,7 +153,7 @@ def build_demo_repo(work: Path, venv_python: Path, broken: bool) -> None:
         "model: \"qwen2.5:14b\"\n"
         "model_temperature: 0.1\n"
         "model_timeout: 60\n"
-        "edgerecord_db: \"~/.edgerecord/ledger.sqlite\"\n"
+        "edgerecord_db: \"ledger.sqlite\"\n"
         "docker_image: \"taskrivet/sandbox:latest\"\n"
         "docker_workdir: \"/workspace\"\n"
         "docker_timeout: 300\n"
