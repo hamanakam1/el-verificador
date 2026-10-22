@@ -138,6 +138,29 @@ end-to-end against a real repository — see the screenshots above.
 - The EdgeRecord audit record is written to a local SQLite ledger
   (`~/.edgerecord/ledger.sqlite`), not to a canonical EdgeRecord receipt.
 
+## What El Verificador gates
+
+El Verificador sits downstream of
+[Taskrivet](https://github.com/hamanakam1/taskrivet). Taskrivet does the work;
+El Verificador decides whether that work is real.
+
+![Taskrivet workspace](docs/screenshots/taskrivet-workspace.png)
+
+*Taskrivet's workspace view. Every task carries an objective, acceptance
+criteria, a resource scope, and a token budget. The queue shows `READY`,
+`RUNNING`, `REVIEW`, `BLOCKED`, and `ACCEPTED` states, and "Accepted outcomes"
+counts only work an operator explicitly accepted — activity is not completion.
+The ledger behind this screenshot is a synthetic fixture.*
+
+![Taskrivet failure ledger](docs/screenshots/taskrivet-failure-ledger.png)
+
+*Failures stay in the record across retries. Each one carries a stable
+fingerprint, so a recurring failure groups instead of quietly disappearing.
+This is the evidence El Verificador's correction loop is built to answer.*
+
+Screenshot provenance is recorded in
+[docs/screenshots/SOURCES.md](docs/screenshots/SOURCES.md).
+
 ## Quick Start
 
 ```bash
