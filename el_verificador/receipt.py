@@ -32,9 +32,10 @@ import hashlib
 import json
 import os
 import tempfile
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, BinaryIO, Dict, Iterator, List, Optional, Sequence, Tuple
 
 RECEIPT_TYPE = "EdgeRecordReceipt"
 RECEIPT_VERSION = "v1.1.3"
@@ -166,11 +167,43 @@ class ReceiptChain:
     `created_at`. The timestamp has second resolution, and a verifier that
     writes several receipts in the same second would otherwise be ordered by
     a random receipt id — which looks exactly like a broken chain.
+
+    Cooperating processes and threads share a persistent local lock file.
+    Writers hold an exclusive lock from predecessor lookup through atomic
+    publication; readers hold a shared lock while loading a complete snapshot.
     """
 
     def __init__(self, directory: str = "~/.el-verificador/receipts"):
         self.directory = Path(directory).expanduser()
         self.directory.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def _locked(self, exclusive: bool) -> Iterator[None]:
+        """Lock a stable inode; never unlink it while the store is in use."""
+        try:
+            import fcntl
+        except ImportError as exc:
+            raise ReceiptChainError("receipt chain locking requires a POSIX local filesystem") from exc
+        lock_file: BinaryIO
+        try:
+            lock_path = self.directory / ".receipt-chain.lock"
+            if exclusive:
+                lock_file = lock_path.open("a+b")
+            else:
+                try:
+                    lock_file = lock_path.open("rb")
+                except FileNotFoundError:
+                    lock_file = lock_path.open("a+b")
+        except OSError as exc:
+            raise ReceiptChainError("cannot open receipt chain lock") from exc
+        with lock_file:
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+            except OSError as exc:
+                raise ReceiptChainError("cannot acquire receipt chain lock") from exc
+            # Closing this independently opened descriptor releases the lock,
+            # including on exceptions. Process exit also releases kernel locks.
+            yield
 
     # ------------------------------------------------------------------ #
     def append(self, receipt: Dict[str, Any]) -> Path:
@@ -185,7 +218,12 @@ class ReceiptChain:
         if problems:
             raise ValueError("invalid receipt: " + "; ".join(problems))
 
-        previous = self.last()
+        with self._locked(exclusive=True):
+            return self._append_locked(receipt, receipt_id)
+
+    def _append_locked(self, receipt: Dict[str, Any], receipt_id: str) -> Path:
+        records = self._read_receipts()
+        previous = records[-1] if records else None
         if previous is not None:
             receipt["previous_receipt_id"] = previous.get("receipt_id")
             receipt["previous_fingerprint"] = previous.get("proof_fingerprint")
@@ -220,6 +258,11 @@ class ReceiptChain:
         Skipping a damaged file could expose an older success as the latest
         verdict and let new receipts fork from an incomplete history.
         """
+        with self._locked(exclusive=False):
+            return self._read_receipts()
+
+    def _read_receipts(self) -> List[Dict[str, Any]]:
+        """Load the chain while the caller holds its shared or exclusive lock."""
         records: List[Dict[str, Any]] = []
         try:
             paths = sorted(path for path in self.directory.iterdir() if path.suffix == ".json")

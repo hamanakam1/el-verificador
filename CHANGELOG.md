@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Serialize receipt appends across cooperating processes and threads on POSIX
+  local filesystems so concurrent writers use distinct sequences and one chain.
+  Shared reader locks keep verification consistent during publication; lock
+  failures remain explicit and a process exit releases its kernel lock.
 - Require explicit integer exit statuses from Docker and replay fixtures;
   malformed or duplicate fixture results cannot produce a passing check.
 - Preserve timeout results when an abandoned Docker worker finishes late.

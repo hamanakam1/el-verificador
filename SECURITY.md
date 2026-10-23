@@ -55,6 +55,21 @@ Two things are written, and they are not the same thing:
 - **The ledger** (`~/.edgerecord/ledger.sqlite`) — a derived query cache over
   the receipts. Rebuildable, never authoritative.
 
+On POSIX local filesystems, `ReceiptChain` serializes cooperating writers with
+an exclusive `flock` from predecessor validation through sequence assignment,
+fingerprinting and atomic publication. Readers hold a shared lock while loading
+and validating a consistent snapshot. The persistent `.receipt-chain.lock` file
+must not be removed or replaced while the store is in use. Creating it requires
+write access to the directory; once it exists, readers can open it read-only.
+Lock acquisition failures refuse the operation instead of continuing unlocked.
+
+These advisory locks do not protect against programs that edit receipts directly,
+and network filesystems and non-POSIX platforms are not supported for this lock
+protocol. Calls wait while another process holds an incompatible lock; the
+operating system releases it when that process exits. Atomic publication and
+locking do not add a power-loss durability guarantee, and an abrupt exit before
+publication can leave an ignored temporary file.
+
 The evidence store (`~/.el-verificador/evidence/`) is content-addressed: the
 path is the hash, so nothing is ever overwritten and every artifact can be
 re-hashed to prove it is what the decision was made from.

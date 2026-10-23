@@ -10,12 +10,16 @@ reference verifier rejected, because Python's `json.dumps` escapes non-ASCII by
 default and the canonical rule requires it to be left as literal UTF-8.
 """
 import json
+import multiprocessing
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
+from threading import Barrier, Event
 from unittest.mock import patch
 
 from el_verificador.receipt import (
@@ -44,6 +48,96 @@ def _receipt(**kwargs):
     )
     base.update(kwargs)
     return build_receipt(**base)
+
+
+def _append_process_batch(directory, worker_id, ready, start):
+    """Spawn-safe writer; widen the old predecessor-read race deliberately."""
+    chain = ReceiptChain(directory)
+    read_receipts = chain._read_receipts
+
+    def slow_read():
+        records = read_receipts()
+        time.sleep(0.01)
+        return records
+
+    ready.put(worker_id)
+    if not start.wait(10):
+        raise RuntimeError("parallel writer start timed out")
+    with patch.object(chain, "_read_receipts", side_effect=slow_read):
+        for index in range(3):
+            chain.append(_receipt(receipt_id=f"worker-{worker_id}-{index}"))
+
+
+def _exit_with_receipt_lock(directory, locked, exit_now):
+    chain = ReceiptChain(directory)
+    with chain._locked(exclusive=True):
+        locked.set()
+        if not exit_now.wait(10):
+            raise RuntimeError("lock-holder exit timed out")
+        os._exit(0)  # Abrupt exit bypasses context-manager cleanup.
+
+
+def _stop_process(process):
+    if process.is_alive():
+        process.terminate()
+    process.join(timeout=5)
+
+
+def _append_thread_batch(directory):
+    """Run threads in a killable child so a deadlock cannot hang the suite."""
+    chain = ReceiptChain(directory)
+    ready = Barrier(8)
+    read_receipts = chain._read_receipts
+
+    def slow_read():
+        records = read_receipts()
+        time.sleep(0.01)
+        return records
+
+    def append(index):
+        ready.wait(timeout=5)
+        return chain.append(_receipt(receipt_id=f"thread-{index}"))
+
+    with patch.object(chain, "_read_receipts", side_effect=slow_read):
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            assert len(list(pool.map(append, range(8), timeout=10))) == 8
+
+
+def _read_during_publication(directory):
+    chain = ReceiptChain(directory)
+    chain.append(_receipt(receipt_id="first"))
+    publishing = Event()
+    publish = Event()
+    reading = Event()
+    real_link = os.link
+
+    def paused_publish(source, target):
+        publishing.set()
+        if not publish.wait(5):
+            raise RuntimeError("publication timed out")
+        real_link(source, target)
+
+    def read():
+        reading.set()
+        return ReceiptChain(directory).receipts()
+
+    with patch("el_verificador.receipt.os.link", side_effect=paused_publish):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            writer = pool.submit(chain.append, _receipt(receipt_id="second"))
+            try:
+                assert publishing.wait(5)
+                reader = pool.submit(read)
+                assert reading.wait(5)
+                try:
+                    reader.result(timeout=0.05)
+                except TimeoutError:
+                    pass
+                else:
+                    raise AssertionError("reader did not wait for publication")
+            finally:
+                publish.set()
+            writer.result(timeout=5)
+            assert [r["receipt_id"] for r in reader.result(timeout=5)] == ["first", "second"]
 
 
 class TestCanonicalHashing(unittest.TestCase):
@@ -182,7 +276,8 @@ class TestReceiptChain(unittest.TestCase):
                 with self.assertRaises(ReceiptChainError):
                     self.chain.append(_receipt(receipt_id="next"))
                 self.assertEqual(path.read_bytes(), damaged)
-                self.assertEqual(list(Path(self._tmp.name).iterdir()), [path])
+                self.assertEqual({p.name for p in Path(self._tmp.name).iterdir()},
+                                 {path.name, ".receipt-chain.lock"})
 
     def test_a_truncated_tail_cannot_hide_a_newer_verdict(self):
         first = self.chain.append(_receipt(receipt_id="first"))
@@ -228,7 +323,8 @@ class TestReceiptChain(unittest.TestCase):
         with self.assertRaisesRegex(ReceiptChainError, "already exists"):
             self.chain.append(_receipt(receipt_id="duplicate", outcome="failed"))
         self.assertEqual(path.read_bytes(), original)
-        self.assertEqual(list(Path(self._tmp.name).iterdir()), [path])
+        self.assertEqual({p.name for p in Path(self._tmp.name).iterdir()},
+                         {path.name, ".receipt-chain.lock"})
         self.assertTrue(self.chain.verify_chain())
 
     def test_invalid_receipt_ids_are_rejected_before_writing(self):
@@ -250,7 +346,104 @@ class TestReceiptChain(unittest.TestCase):
             with self.assertRaisesRegex(ReceiptChainError, "already exists"):
                 self.chain.append(_receipt(receipt_id="racing"))
         self.assertEqual(destination.read_bytes(), b"concurrent receipt bytes")
-        self.assertEqual(list(Path(self._tmp.name).iterdir()), [destination])
+        self.assertEqual({p.name for p in Path(self._tmp.name).iterdir()},
+                         {destination.name, ".receipt-chain.lock"})
+
+    def test_parallel_processes_publish_one_contiguous_chain(self):
+        context = multiprocessing.get_context("spawn")
+        ready = context.Queue()
+        start = context.Event()
+        workers = [context.Process(target=_append_process_batch,
+                                   args=(self._tmp.name, index, ready, start))
+                   for index in range(4)]
+        try:
+            for worker in workers:
+                worker.start()
+                self.addCleanup(_stop_process, worker)
+            self.assertEqual({ready.get(timeout=15) for _ in workers}, set(range(4)))
+            start.set()
+            for worker in workers:
+                worker.join(timeout=15)
+                self.assertFalse(worker.is_alive(), "parallel receipt writer hung")
+                self.assertEqual(worker.exitcode, 0)
+        finally:
+            start.set()
+            ready.close()
+        records = self.chain.receipts()
+        self.assertEqual([record["seq"] for record in records], list(range(1, 13)))
+        self.assertEqual(len({record["receipt_id"] for record in records}), 12)
+        self.assertTrue(self.chain.verify_chain())
+        self.assertFalse(list(Path(self._tmp.name).glob("*.tmp")))
+
+    def test_parallel_threads_using_the_same_instance_serialize(self):
+        self._run_bounded_child(_append_thread_batch)
+        self.assertEqual([r["seq"] for r in self.chain.receipts()], list(range(1, 9)))
+        self.assertTrue(self.chain.verify_chain())
+
+    def test_reader_waits_for_complete_publication(self):
+        self._run_bounded_child(_read_during_publication)
+        self.assertEqual([r["receipt_id"] for r in self.chain.receipts()], ["first", "second"])
+        self.assertTrue(self.chain.verify_chain())
+
+    def _run_bounded_child(self, target):
+        worker = multiprocessing.get_context("spawn").Process(target=target,
+                                                               args=(self._tmp.name,))
+        worker.start()
+        self.addCleanup(_stop_process, worker)
+        worker.join(timeout=15)
+        self.assertFalse(worker.is_alive(), "threaded receipt scenario hung")
+        self.assertEqual(worker.exitcode, 0)
+
+    def test_process_exit_releases_the_persistent_lock(self):
+        context = multiprocessing.get_context("spawn")
+        locked = context.Event()
+        exit_now = context.Event()
+        worker = context.Process(target=_exit_with_receipt_lock,
+                                 args=(self._tmp.name, locked, exit_now))
+        worker.start()
+        self.addCleanup(_stop_process, worker)
+        self.assertTrue(locked.wait(10))
+        lock_path = Path(self._tmp.name) / ".receipt-chain.lock"
+        inode = lock_path.stat().st_ino
+        exit_now.set()
+        worker.join(timeout=10)
+        self.assertEqual(worker.exitcode, 0)
+        self.chain.append(_receipt())
+        self.assertEqual(lock_path.stat().st_ino, inode)
+        self.assertTrue(self.chain.verify_chain())
+
+    def test_lock_failure_preserves_existing_receipts(self):
+        path = self.chain.append(_receipt())
+        original = path.read_bytes()
+        with patch("fcntl.flock", side_effect=OSError("lock unavailable")):
+            self.assertFalse(self.chain.verify_chain())
+            with self.assertRaisesRegex(ReceiptChainError, "cannot acquire"):
+                self.chain.append(_receipt(receipt_id="blocked"))
+        self.assertEqual(path.read_bytes(), original)
+        self.chain.append(_receipt(receipt_id="after-lock-failure"))
+        self.assertTrue(self.chain.verify_chain())
+
+    def test_lock_open_failure_refuses_unlocked_operations(self):
+        with patch.object(Path, "open", side_effect=PermissionError("denied")):
+            self.assertFalse(self.chain.verify_chain())
+            with self.assertRaisesRegex(ReceiptChainError, "cannot open"):
+                self.chain.append(_receipt())
+        self.assertEqual(list(Path(self._tmp.name).iterdir()), [])
+
+    def test_existing_lock_can_be_opened_read_only_for_readers(self):
+        self.chain.append(_receipt())
+        real_open = Path.open
+
+        def read_only_lock(path, mode="r", *args, **kwargs):
+            if path.name == ".receipt-chain.lock" and mode != "rb":
+                raise PermissionError("lock is read-only")
+            return real_open(path, mode, *args, **kwargs)
+
+        with patch.object(Path, "open", read_only_lock):
+            self.assertTrue(self.chain.verify_chain())
+            self.assertEqual(len(self.chain.receipts()), 1)
+            with self.assertRaisesRegex(ReceiptChainError, "cannot open"):
+                self.chain.append(_receipt(receipt_id="requires-write-access"))
 
     def test_receipts_can_be_found_by_ticket(self):
         self.chain.append(_receipt(receipt_id="va-audit-0000000000000001", ticket="M-7"))
