@@ -188,11 +188,22 @@ repositories with known verdicts, verified end to end through real git:
 | `broken_build` | fail — `acceptance_command_0` |
 | `contract_honoured` | fail — the work package's own `npm test` failure is respected |
 | `missing_exit_status` | inconclusive — an absent exit code cannot count as success |
+| `sandbox_timeout` | escalate — confirmed sandbox termination still ends the verification |
+| `sandbox_timeout_unconfirmed` | escalate — an unconfirmed stop preserves evidence and blocks continuation |
 
 Replay fixtures must contain one result per exact command, with an explicit
 integer `exit_code`. Invalid or duplicate records are skipped, leaving the
 acceptance obligation unresolved. Docker results without a valid integer exit
 status fail with exit `125`; a late result cannot replace a reported timeout.
+
+A runner deadline immediately invalidates the sandbox and attempts bounded
+termination. Later checks are skipped, and the verifier writes an `escalate`
+receipt with the timeout and cleanup evidence. It does not continue into
+semantic analysis, correction, or commit. If termination cannot be confirmed,
+the container may still be running: the runner retains its identity and refuses
+a fresh start until cleanup is confirmed. The timeout golden scenarios use
+synthetic repositories and a mocked Docker client; they do not run acceptance
+commands on the host or prove real Docker daemon behavior.
 
 Receipt-chain reads validate every stored record. A damaged receipt causes an
 integrity error and prevents further appends, rather than exposing an older

@@ -189,10 +189,13 @@ class TestDockerRunnerLiveMode(unittest.TestCase):
 
     def test_probe_is_callable_and_cached(self):
         runner = DockerRunner(self.config)
-        first = runner._docker_available()
-        self.assertIsInstance(first, bool)
-        self.assertEqual(runner._docker_ok, first)
-        self.assertEqual(runner._docker_available(), first)
+        client = mock.Mock()
+        with mock.patch("docker.from_env", return_value=client):
+            first = runner._docker_available()
+            self.assertIsInstance(first, bool)
+            self.assertEqual(runner._docker_ok, first)
+            self.assertEqual(runner._docker_available(), first)
+        client.ping.assert_called_once()
 
     def test_missing_daemon_raises_instead_of_running_locally(self):
         """No daemon must fail loudly, never silently degrade to the host."""

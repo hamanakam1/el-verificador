@@ -24,8 +24,20 @@ the component, and the boundaries are not negotiable:
   duplicate replay records are skipped and cannot satisfy acceptance.
 - The container runs as a non-root uid, with the network disabled by default and
   with memory, CPU and PID caps.
-- Each check has a wall-clock limit. An overrun is reported as exit `124`, and
-  the container is torn down at the end of the run.
+- Each check has a wall-clock limit. An actual runner timeout retains exit
+  `124`, invalidates the sandbox immediately, and attempts to kill and inspect
+  that container within a five-second cleanup window. A successful kill call
+  alone is not proof: fresh `Running: false` state or Docker `NotFound` is
+  required to confirm termination. Remaining checks are marked skipped.
+- A timed-out verification escalates with its check results, lifecycle evidence,
+  and receipt. It does not compute a semantic diff, request a correction, or
+  commit, even when termination is confirmed. A command that exits `124` itself
+  without overrunning the runner deadline remains an ordinary failed check.
+- An unavailable daemon or an unconfirmed stop can leave the sandbox running.
+  The runner retains its identity and refuses a new start until teardown can
+  confirm termination. Final teardown may retry cleanup; a late worker result
+  cannot replace the recorded timeout. Only a new explicit verification may
+  provision a fresh sandbox after confirmed cleanup.
 - The sandbox image (`docker/verification/Dockerfile`) carries the acceptance
   toolchain, so nothing has to be fetched while untrusted code is on the
   machine. A project-specific image is the operator's business.

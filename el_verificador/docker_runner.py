@@ -43,6 +43,15 @@ class SandboxUnavailableError(RuntimeError):
     """
 
 
+class SandboxAbortedError(RuntimeError):
+    """A timed-out sandbox cannot continue this verification safely."""
+
+    def __init__(self, checks: List[CheckResult], termination_confirmed: bool, detail: str):
+        super().__init__(detail)
+        self.checks = list(checks)
+        self.termination_confirmed = termination_confirmed
+
+
 @dataclass
 class ContainerHandle:
     """Opaque handle to a running sandbox container."""
@@ -70,12 +79,22 @@ class DockerRunner:
         # `TypeError: 'NoneType' object is not callable`.
         self._docker_ok: Optional[bool] = None
         self._fixture: Optional[Dict[str, Dict[str, Any]]] = None
+        self._aborted = False
+        self._termination_confirmed = False
+        self._abort_detail = ""
+        self._termination_timeout_s = 5
 
     # ------------------------------------------------------------------ #
     # Lifecycle
     # ------------------------------------------------------------------ #
     def start(self, repo_path: str) -> ContainerHandle:
         """Provision the sandbox container with the repo mounted as a volume."""
+        if self._aborted:
+            if not self._termination_confirmed:
+                raise SandboxUnavailableError(
+                    "previous sandbox termination is unconfirmed; cleanup is required before restart"
+                )
+            self.teardown()
         if self.config.dry_run:
             # No container, and therefore no execution. Checks are replayed
             # from a recorded fixture if one is configured, and skipped
@@ -86,6 +105,7 @@ class DockerRunner:
                 workdir=str(Path(repo_path).resolve()),
                 is_container=False,
             )
+            self._aborted = False
             return self._container
 
         if not self._docker_available():
@@ -132,6 +152,7 @@ class DockerRunner:
             image=self.config.docker_image,
             workdir=self.config.docker_workdir,
         )
+        self._aborted = False
         return self._container
 
     def teardown(self) -> None:
@@ -139,13 +160,22 @@ class DockerRunner:
         if self._container is None:
             return
 
+        if self._aborted and not self._termination_confirmed:
+            self._termination_confirmed = self._terminate_sandbox()
+            if not self._termination_confirmed:
+                # Keep the identity of a possibly running sandbox. A new
+                # verification must not silently abandon it and start another.
+                return
+
         if self._container.is_container:
             try:
                 import docker
 
-                client = docker.from_env()
+                client = (docker.from_env(timeout=self._termination_timeout_s)
+                          if self._aborted else docker.from_env())
                 container = client.containers.get(self._container.container_id)
-                container.stop(timeout=10)
+                if not self._aborted:
+                    container.stop(timeout=10)
                 container.remove(force=True)
             except Exception:
                 # Best-effort teardown; never mask a verification result
@@ -153,12 +183,64 @@ class DockerRunner:
 
         self._container = None
 
+    def _terminate_sandbox(self) -> bool:
+        """Bound the kill/inspection attempt and require positive stop evidence."""
+        import threading
+
+        if self._container is None or not self._container.is_container:
+            return False
+        container_id = self._container.container_id
+        confirmed = [False]
+
+        def terminate() -> None:
+            import docker
+
+            client = None
+            try:
+                client = docker.from_env(timeout=self._termination_timeout_s)
+                container = client.containers.get(container_id)
+                try:
+                    container.kill()
+                except docker.errors.NotFound:
+                    confirmed[0] = True
+                    return
+                except docker.errors.DockerException:
+                    # A failed kill can race an ordinary exit; fresh state is
+                    # still required before saying the sandbox is stopped.
+                    pass
+                container.reload()
+                state = container.attrs.get("State")
+                confirmed[0] = isinstance(state, dict) and state.get("Running") is False
+            except docker.errors.NotFound:
+                confirmed[0] = True
+            except Exception:
+                # Never turn an unavailable daemon or malformed response into
+                # confirmation, or expose daemon error text in the receipt.
+                pass
+            finally:
+                if client is not None:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+
+        worker = threading.Thread(target=terminate, daemon=True)
+        worker.start()
+        worker.join(timeout=self._termination_timeout_s)
+        return not worker.is_alive() and confirmed[0]
+
     # ------------------------------------------------------------------ #
     # Checks
     # ------------------------------------------------------------------ #
     def run_check(self, kind: CheckKind, command: str) -> CheckResult:
         """Run a single acceptance check inside the sandbox container."""
         start = time.time()
+
+        if self._aborted:
+            raise SandboxAbortedError(
+                [self._skipped_after_abort(kind, command)],
+                self._termination_confirmed, self._abort_detail,
+            )
 
         if not self._container or not self._container.is_container:
             return self._replay_or_skip(kind, command, start)
@@ -172,6 +254,16 @@ class DockerRunner:
         exit_code, stdout, stderr, timed_out = self._exec_with_timeout(
             client, container, command
         )
+        if timed_out:
+            self._aborted = True
+            self._termination_confirmed = self._terminate_sandbox()
+            self._abort_detail = (
+                "acceptance command timed out; sandbox termination confirmed"
+                if self._termination_confirmed else
+                "acceptance command timed out; sandbox termination unconfirmed; "
+                "the sandbox may still be running and requires operator cleanup"
+            )
+            stderr = f"{stderr}; {self._abort_detail}"
 
         return CheckResult(
             kind=kind,
@@ -191,9 +283,8 @@ class DockerRunner:
         `Container.exec_run` has no `timeout` parameter — passing one raised
         `TypeError` on every non-dry-run check, so the acceptance pipeline
         never ran at all outside dry-run mode. The deadline is enforced here
-        with a worker thread; a check that overruns is reported as exit 124
-        and the container teardown at the end of the verification kills
-        whatever is still running inside it.
+        with a worker thread; a check that overruns is reported as exit 124.
+        The caller immediately invalidates the sandbox and attempts to stop it.
         """
         import threading
 
@@ -232,8 +323,7 @@ class DockerRunner:
             # Return an immutable timeout outcome. The abandoned worker can
             # finish later, but cannot replace the timeout with a success.
             return 124, "", (
-                f"command exceeded the {self.config.docker_timeout}s limit and was "
-                f"abandoned; the sandbox is torn down at the end of the run"
+                f"command exceeded the {self.config.docker_timeout}s limit"
             ), True
         return (
             outcome["exit_code"],
@@ -258,6 +348,11 @@ class DockerRunner:
             stderr = bytes(stderr).decode(errors="replace")
         return str(stdout or ""), str(stderr or "")
 
+    def _skipped_after_abort(self, kind: CheckKind, command: str) -> CheckResult:
+        return CheckResult(kind=kind, command=command, exit_code=125,
+                           stderr="not executed: sandbox was invalidated by a timeout",
+                           execution=CheckExecution.SKIPPED)
+
     def run_all(self, commands: Optional[List[str]] = None) -> List[CheckResult]:
         """Run every acceptance command in order and return results."""
         commands = commands or self.config.test_commands
@@ -265,7 +360,13 @@ class DockerRunner:
 
         for index, command in enumerate(commands):
             kind = self._infer_kind(command, index)
-            results.append(self.run_check(kind, command))
+            if not self._aborted:
+                results.append(self.run_check(kind, command))
+            else:
+                results.append(self._skipped_after_abort(kind, command))
+
+        if self._aborted:
+            raise SandboxAbortedError(results, self._termination_confirmed, self._abort_detail)
 
         return results
 

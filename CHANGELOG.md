@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Abort verification on actual sandbox timeouts: attempt bounded termination,
+  require positive stop evidence, skip later commands, and escalate with sealed
+  evidence instead of continuing into semantic analysis, correction, or commit.
+  Retain unconfirmed sandbox identities and refuse unsafe restart. Two golden
+  scenarios cover confirmed and unconfirmed termination without a real daemon.
+- Mock the daemon availability probe in its cache regression test so the default
+  suite no longer contacts the operator's Docker service for that check.
 - Serialize receipt appends across cooperating processes and threads on POSIX
   local filesystems so concurrent writers use distinct sequences and one chain.
   Shared reader locks keep verification consistent during publication; lock

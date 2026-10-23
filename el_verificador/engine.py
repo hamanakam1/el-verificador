@@ -26,7 +26,7 @@ from uuid import uuid4
 
 from .acceptance import AcceptanceContract, resolve_acceptance
 from .correction import CorrectionLoop, RetryExhausted
-from .docker_runner import DockerRunner
+from .docker_runner import DockerRunner, SandboxAbortedError
 from .evidence import (
     EvidenceArtifact,
     EvidenceKind,
@@ -47,6 +47,7 @@ from .schemas import (
     CorrectionPrompt,
     IntentPackage,
     SemanticDiff,
+    VerificationAttempt,
     VerificationAudit,
     VerificationConfig,
     VerificationDecision,
@@ -135,6 +136,7 @@ class ElVerificador:
                 if result.decision not in (
                     VerificationDecision.PASS,
                     VerificationDecision.INCONCLUSIVE,
+                    VerificationDecision.ESCALATE,
                 ):
                     result.decision = VerificationDecision.FAIL
                 return self._finalize(result, intent, repo_path, start)
@@ -188,7 +190,33 @@ class ElVerificador:
         self.acceptance_contract = contract
 
         # Stage 1: Independent acceptance testing inside the sandbox
-        check_results = self.deps.docker.run_all(commands=contract.commands)
+        try:
+            check_results = self.deps.docker.run_all(commands=contract.commands)
+        except SandboxAbortedError as exc:
+            # No semantic read or correction is safe while termination may be
+            # unconfirmed. Preserve the lifecycle evidence and end this run.
+            records: List[Dict[str, Any]] = [{
+                "id": "sandbox_lifecycle",
+                "kind": "acceptance_command",
+                "statement": "Acceptance execution completed inside its time budget",
+                "status": "unproven",
+                "detail": str(exc),
+                "termination_confirmed": exc.termination_confirmed,
+            }]
+            artifacts = self._seal_evidence(exc.checks, None, records, contract)
+            return VerificationResult(
+                work_package_id=intent.id, repo_path=repo_path,
+                base_commit=base_commit, head_commit=head_commit,
+                decision=VerificationDecision.ESCALATE, check_results=exc.checks,
+                obligations=records, evidence_hashes=[a.sha256 for a in artifacts],
+                evidence_artifacts=[a.model_dump(mode="json") for a in artifacts],
+                attempts=[VerificationAttempt(
+                    attempt=attempt, decision=VerificationDecision.ESCALATE,
+                    check_results=exc.checks, obligations=records,
+                    evidence_hashes=[a.sha256 for a in artifacts],
+                )],
+                passed=False, committed=False,
+            )
 
         # Stage 2: Semantic diff / intent alignment
         diff_engine = SemanticDiffEngine(repo_path, base_commit, head_commit)
@@ -337,6 +365,10 @@ class ElVerificador:
         escalation_reason: Optional[str] = None,
     ) -> VerificationResult:
         total_duration_ms = int((time.time() - start) * 1000)
+        if escalation_reason is None and result.decision == VerificationDecision.ESCALATE:
+            escalation_reason = next(
+                (str(o["detail"]) for o in result.obligations
+                 if o.get("id") == "sandbox_lifecycle" and o.get("detail")), None)
 
         # Commit on pass, and only the files the verifier evaluated.
         #
@@ -412,7 +444,7 @@ class ElVerificador:
             )
 
         reason = (
-            f"{len(result.attempts)} attempt(s) exhausted for {intent.id} "
+            f"Verification escalated after {len(result.attempts)} attempt(s) for {intent.id} "
             f"({intent.true_goal_summary}). "
             f"{escalation_reason or ''} "
             f"{len(result.evidence_hashes)} evidence artifact(s); "

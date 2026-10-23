@@ -150,6 +150,13 @@ class CorrectionLoop:
                 result.attempts = self.attempts
                 return result
 
+            if result.decision == VerificationDecision.ESCALATE:
+                # An unsafe sandbox lifecycle already requires human attention.
+                # Do not compose a prompt or invoke work in the aborted sandbox.
+                self.attempts.append(attempt_record)
+                result.attempts = self.attempts
+                return result
+
             if attempt >= self.config.max_retries:
                 # Record the final attempt before escalating: the escalation
                 # is only useful if it arrives with the evidence that caused

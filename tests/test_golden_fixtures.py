@@ -20,9 +20,12 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from el_verificador.acceptance import resolve_acceptance
 from el_verificador.engine import ElVerificador
+from el_verificador.evidence import EvidenceStore
+from el_verificador.receipt import ReceiptChain
 from el_verificador.schemas import (
     IntentPackage,
     VerificationConfig,
@@ -138,9 +141,45 @@ class TestGoldenFixtures(unittest.TestCase):
             import asyncio
 
             verifier = ElVerificador(config)
-            result = asyncio.run(
-                verifier.verify(work_package, str(repo), base, head)
-            )
+            if expected.get("sandbox_timeout"):
+                # Exercise the real runner/engine boundary with a synthetic
+                # Docker client. No acceptance command or daemon is invoked.
+                config.dry_run = False
+                client = mock.Mock()
+                container = client.containers.get.return_value
+                container.id = "golden-timeout"
+                confirmed = expected.get("termination_confirmed", True)
+                container.attrs = {"State": {"Running": not confirmed}}
+                client.containers.run.return_value = container
+                retry = mock.Mock()
+                with mock.patch("docker.from_env", return_value=client), \
+                        mock.patch.object(verifier.deps.docker, "_docker_available", return_value=True), \
+                        mock.patch.object(verifier.deps.docker, "_exec_with_timeout",
+                                          return_value=(124, "", "synthetic timeout", True)), \
+                        mock.patch("el_verificador.engine.SemanticDiffEngine") as diff, \
+                        mock.patch("el_verificador.git_ops.GitOps.commit") as commit, \
+                        mock.patch("el_verificador.correction.CorrectionLoop._compose_correction_prompt",
+                                   new_callable=mock.AsyncMock) as compose:
+                    result = asyncio.run(verifier.verify(
+                        work_package, str(repo), base, head,
+                        taskrivet_retry=retry if expected.get("with_retries", True) else None))
+                diff.assert_not_called()
+                commit.assert_not_called()
+                compose.assert_not_called()
+                retry.assert_not_called()
+                self.assertEqual(len(result.attempts), 1)
+                self.assertEqual(result.check_results[0].exit_code, 124)
+                self.assertTrue(result.evidence_artifacts)
+                self.assertTrue(result.receipt_id)
+                self.assertFalse(result.committed)
+                self.assertEqual(result.obligations[0]["termination_confirmed"], confirmed)
+                self.assertTrue(ReceiptChain(config.receipt_dir).verify_chain())
+                for digest in result.evidence_hashes:
+                    self.assertIsNotNone(EvidenceStore(config.evidence_root).get(digest))
+            else:
+                result = asyncio.run(
+                    verifier.verify(work_package, str(repo), base, head)
+                )
         return result, expected
 
     def _cases(self):

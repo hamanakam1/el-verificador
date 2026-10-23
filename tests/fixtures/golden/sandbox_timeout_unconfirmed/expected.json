@@ -1,0 +1,7 @@
+{
+  "decision": "escalate",
+  "violations": [],
+  "sandbox_timeout": true,
+  "termination_confirmed": false,
+  "with_retries": false
+}
