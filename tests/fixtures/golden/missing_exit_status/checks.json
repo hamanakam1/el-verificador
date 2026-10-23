@@ -1,0 +1,8 @@
+{
+  "checks": [
+    {
+      "command": "pytest -q",
+      "stdout": "Result unavailable; no exit status recorded."
+    }
+  ]
+}

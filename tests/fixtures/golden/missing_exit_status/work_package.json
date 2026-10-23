@@ -1,0 +1,11 @@
+{
+  "id": "dwp-x",
+  "true_goal": "Implement the create_user_route function that returns a user payload",
+  "true_goal_summary": "create_user_route returns a user payload",
+  "related_files": [
+    "app/api.py"
+  ],
+  "acceptance_commands": [
+    "pytest -q"
+  ]
+}

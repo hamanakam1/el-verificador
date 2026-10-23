@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from el_verificador.evidence import (
+    EvidenceIntegrityError,
     EvidenceKind,
     EvidenceStore,
     summarise_diff,
@@ -19,6 +20,7 @@ from el_verificador.schemas import ASTChange, ChangeType, SemanticDiff, SymbolKi
 class TestEvidenceStore(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
         self.store = EvidenceStore(self._tmp.name)
 
     def test_an_artifact_is_addressed_by_its_hash(self):
@@ -77,6 +79,32 @@ class TestEvidenceStore(unittest.TestCase):
 
     def test_a_digest_that_was_never_stored_is_not_found(self):
         self.assertIsNone(self.store.get("f" * 64))
+
+    def test_digest_lookup_rejects_tampered_content(self):
+        artifact = self.store.write_text(EvidenceKind.CHECK_STDOUT, "original")
+        Path(artifact.path).write_text("tampered")
+        with self.assertRaises(EvidenceIntegrityError):
+            self.store.get(artifact.id)
+        self.assertFalse(artifact.verify())
+
+    def test_reusing_a_corrupted_artifact_fails_without_overwriting_it(self):
+        artifact = self.store.write_text(EvidenceKind.CHECK_STDOUT, "original")
+        Path(artifact.path).write_text("tampered")
+        with self.assertRaises(EvidenceIntegrityError):
+            self.store.write_text(EvidenceKind.CHECK_STDOUT, "original")
+        self.assertEqual(Path(artifact.path).read_text(), "tampered")
+
+    def test_lookup_requires_a_sha256_address(self):
+        for digest in ("", "../outside", "/tmp", "f" * 63, "g" * 64):
+            with self.subTest(digest=digest), self.assertRaises(ValueError):
+                self.store.get(digest)
+
+    def test_verification_checks_the_record_identity_and_size(self):
+        artifact = self.store.write_text(EvidenceKind.CHECK_STDOUT, "original")
+        wrong_identity = artifact.model_copy(update={"id": "f" * 64})
+        wrong_size = artifact.model_copy(update={"bytes": artifact.bytes + 1})
+        self.assertFalse(wrong_identity.verify())
+        self.assertFalse(wrong_size.verify())
 
 
 class TestSummariseDiff(unittest.TestCase):

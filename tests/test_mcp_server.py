@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 from el_verificador.mcp_server import TOOL_NAMES, VerificationTools
+from el_verificador.receipt import ReceiptChain, build_receipt
 from tests.support import TempStore
 
 
@@ -45,6 +46,28 @@ class TestVerificationTools(unittest.TestCase):
     def test_evidence_for_an_unknown_receipt(self):
         result = self.tools.verification_evidence("va-audit-nothing")
         self.assertFalse(result["found"])
+
+    def test_corrupt_chain_reports_invalid_instead_of_an_older_success(self):
+        chain = ReceiptChain(self.tools.config.receipt_dir)
+        chain.append(build_receipt("first", "verification", "success",
+                                   work_package_id="dwp-damaged"))
+        newest = chain.append(build_receipt("second", "verification", "failed",
+                                            work_package_id="dwp-damaged"))
+        newest.write_text('{"private_output": "synthetic-sensitive-fragment"', encoding="utf-8")
+
+        status = self.tools.verification_status("dwp-damaged")
+        evidence = self.tools.verification_evidence("first")
+        validity = self.tools.verify_receipt_chain()
+
+        for response in (status, evidence, validity):
+            self.assertFalse(response["valid"])
+            self.assertEqual(response["error"], "receipt chain integrity check failed")
+            self.assertNotIn("synthetic-sensitive-fragment", json.dumps(response))
+        self.assertFalse(status["found"])
+        self.assertNotIn("outcome", status)
+        self.assertFalse(evidence["found"])
+        self.assertNotIn("artifacts", evidence)
+        self.assertIsNone(validity["receipts"])
 
     def test_verify_returns_a_verdict(self):
         """The tool's whole job: a verdict, with the evidence behind it."""

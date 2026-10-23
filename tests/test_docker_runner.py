@@ -11,12 +11,12 @@ replacement behaviour so it cannot come back.
 """
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import docker
-
 from el_verificador.docker_runner import (
     ContainerHandle,
     DockerRunner,
@@ -122,6 +122,54 @@ class TestCheckFixtureReplay(unittest.TestCase):
         self.assertEqual(result.execution, CheckExecution.SKIPPED)
         self.assertFalse(result.passed)
 
+    def test_invalid_or_ambiguous_record_cannot_manufacture_a_pass(self):
+        for record in (
+            {"command": "pytest -q"},
+            {"command": "pytest -q", "exit_code": None},
+            {"command": "pytest -q", "exit_code": False},
+            {"command": "pytest -q", "exit_code": 0.5},
+            {"command": "pytest -q", "exit_code": "0"},
+            {"command": "pytest -q", "exit_code": 0, "stdout": []},
+            {"command": "pytest -q", "exit_code": 0, "duration_ms": -1},
+        ):
+            with self.subTest(record=record):
+                self.fixture.write_text(json.dumps({"checks": [record]}))
+                runner = DockerRunner(self.config)
+                runner.start(self.repo)
+                result = runner.run_check(CheckKind.UNIT_TESTS, "pytest -q")
+                self.assertEqual(result.execution, CheckExecution.SKIPPED)
+                self.assertFalse(result.passed)
+
+    def test_malformed_fixture_shapes_are_skipped_without_crashing(self):
+        for raw in (None, [], {"checks": None}, {"checks": {}},
+                    {"checks": [None, [], "not a record", {"command": []}]}):
+            with self.subTest(raw=raw):
+                self.fixture.write_text(json.dumps(raw))
+                runner = DockerRunner(self.config)
+                result = runner.run_check(CheckKind.UNIT_TESTS, "pytest -q")
+                self.assertFalse(result.passed)
+                self.assertEqual(result.execution, CheckExecution.SKIPPED)
+
+    def test_duplicate_results_are_not_resolved_by_last_writer_wins(self):
+        for codes in ((1, 0), (0, 1), (0, 0)):
+            with self.subTest(codes=codes):
+                self.fixture.write_text(json.dumps({"checks": [
+                    {"command": "pytest -q", "exit_code": code} for code in codes
+                ]}))
+                runner = DockerRunner(self.config)
+                result = runner.run_check(CheckKind.UNIT_TESTS, "pytest -q")
+                self.assertFalse(result.passed)
+                self.assertEqual(result.execution, CheckExecution.SKIPPED)
+
+    def test_explicit_integer_zero_is_a_valid_replay(self):
+        self.fixture.write_text(json.dumps({"checks": [
+            {"command": "pytest -q", "exit_code": 0, "stdout": "1 passed"}
+        ]}))
+        runner = DockerRunner(self.config)
+        result = runner.run_check(CheckKind.UNIT_TESTS, "pytest -q")
+        self.assertTrue(result.passed)
+        self.assertEqual(result.execution, CheckExecution.REPLAY)
+
 
 class TestDockerRunnerLiveMode(unittest.TestCase):
     """Non-dry-run mode must not crash, and must not fall back to the host.
@@ -169,6 +217,45 @@ class TestDockerRunnerLiveMode(unittest.TestCase):
                 with self.assertRaises(SandboxUnavailableError) as ctx:
                     runner.start(self.repo)
         self.assertIn(self.config.docker_image, str(ctx.exception))
+
+    def test_docker_result_requires_an_explicit_integer_exit_status(self):
+        for exit_code in (None, False, "0", 0.5, 0, 1, 137):
+            with self.subTest(exit_code=exit_code):
+                runner = DockerRunner(self.config)
+                runner._container = ContainerHandle("fake", "test", "/workspace")
+                client = mock.MagicMock()
+                container = client.containers.get.return_value
+                container.exec_run.return_value = mock.Mock(
+                    exit_code=exit_code, output=(b"stdout", b"stderr"))
+                with mock.patch("docker.from_env", return_value=client):
+                    result = runner.run_check(CheckKind.UNIT_TESTS, "pytest -q")
+                valid_status = type(exit_code) is int
+                self.assertEqual(result.exit_code, exit_code if valid_status else 125)
+                self.assertEqual(result.passed, valid_status and exit_code == 0)
+                container.exec_run.assert_called_once_with(
+                    "pytest -q", workdir="/workspace", demux=True)
+
+    def test_late_worker_completion_cannot_change_a_timeout_into_success(self):
+        release = threading.Event()
+        completed = threading.Event()
+
+        def finish_late(*args, **kwargs):
+            release.wait(timeout=2)
+            completed.set()
+            return mock.Mock(exit_code=0, output=(b"late success", b""))
+
+        self.config.docker_timeout = 0
+        runner = DockerRunner(self.config)
+        container = mock.Mock()
+        container.exec_run.side_effect = finish_late
+        try:
+            result = runner._exec_with_timeout(mock.Mock(), container, "pytest -q")
+            self.assertEqual(result[0], 124)
+            self.assertTrue(result[3])
+        finally:
+            release.set()
+        self.assertTrue(completed.wait(timeout=2))
+        self.assertEqual(result[0], 124)
 
 
 class TestCheckKindInference(unittest.TestCase):

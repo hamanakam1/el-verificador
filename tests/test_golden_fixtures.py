@@ -88,6 +88,9 @@ def _check_fixture(
     for a work package that carries its own acceptance contract are not the
     configured defaults.
     """
+    recorded = case / "checks.json"
+    if recorded.is_file():
+        return str(recorded)
     expected = json.loads((case / "expected.json").read_text())
     overrides = expected.get("checks", {})
 
@@ -214,6 +217,14 @@ class TestGoldenFixtures(unittest.TestCase):
         self.assertEqual(result.decision, VerificationDecision.FAIL)
         ids = {o["id"] for o in result.blocking_obligations}
         self.assertIn("change_present", ids)
+
+    def test_missing_exit_status_is_inconclusive_and_cites_evidence(self):
+        result, _ = self._run_case("missing_exit_status")
+        self.assertEqual(result.decision, VerificationDecision.INCONCLUSIVE)
+        self.assertFalse(result.passed)
+        self.assertFalse(result.check_results[0].executed)
+        self.assertTrue(result.evidence_hashes)
+        self.assertTrue(result.blocking_obligations)
 
 
 if __name__ == "__main__":

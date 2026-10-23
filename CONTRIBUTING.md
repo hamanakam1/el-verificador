@@ -56,6 +56,11 @@ python scripts/sandbox_smoke_test.py
 python scripts/capture_screenshots.py
 ```
 
+The `dev` extra includes Docker and PyYAML type stubs for the strict type
+check. The optional comparison against an external EdgeRecord fingerprint
+tool is skipped unless `EL_VERIFICADOR_FINGERPRINT_TOOL` explicitly names the
+tool to execute; the default suite uses the bundled canonical-byte tests.
+
 ## The golden fixture suite
 
 `tests/fixtures/golden/` holds synthetic repositories with **known verdicts**.

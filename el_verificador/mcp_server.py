@@ -24,7 +24,7 @@ import asyncio
 from typing import Any, Dict, Optional
 
 from .engine import ElVerificador
-from .receipt import ReceiptChain
+from .receipt import ReceiptChain, ReceiptChainError
 from .schemas import VerificationConfig
 
 # The tools are also usable without the MCP package, so the logic lives in
@@ -86,9 +86,14 @@ class VerificationTools:
     def verification_status(self, work_package_id: str) -> Dict[str, Any]:
         """The last recorded verdict for a work package."""
         chain = ReceiptChain(self.config.receipt_dir)
+        try:
+            records = chain.receipts()
+        except ReceiptChainError:
+            return {"work_package_id": work_package_id, "found": False,
+                    "valid": False, "error": "receipt chain integrity check failed"}
         matches = [
             receipt
-            for receipt in chain.receipts()
+            for receipt in records
             if receipt.get("work_package_id") == work_package_id
         ]
         if not matches:
@@ -114,7 +119,12 @@ class VerificationTools:
     def verification_evidence(self, receipt_id: str) -> Dict[str, Any]:
         """The evidence artifacts behind a receipt, with their hashes."""
         chain = ReceiptChain(self.config.receipt_dir)
-        for receipt in chain.receipts():
+        try:
+            records = chain.receipts()
+        except ReceiptChainError:
+            return {"receipt_id": receipt_id, "found": False,
+                    "valid": False, "error": "receipt chain integrity check failed"}
+        for receipt in records:
             if receipt.get("receipt_id") != receipt_id:
                 continue
             artifacts = receipt.get("artifacts", [])
@@ -134,9 +144,13 @@ class VerificationTools:
     def verify_receipt_chain(self) -> Dict[str, Any]:
         """Check the durable record's integrity."""
         chain = ReceiptChain(self.config.receipt_dir)
-        receipts = chain.receipts()
+        try:
+            receipts = chain.receipts()
+        except ReceiptChainError:
+            return {"valid": False, "receipts": None, "directory": str(chain.directory),
+                    "error": "receipt chain integrity check failed"}
         return {
-            "valid": chain.verify_chain(),
+            "valid": True,
             "receipts": len(receipts),
             "directory": str(chain.directory),
         }

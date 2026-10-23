@@ -212,7 +212,12 @@ class DockerRunner:
                     demux=True,
                 )
                 stdout, stderr = self._split_output(getattr(exec_result, "output", None))
-                outcome["exit_code"] = exec_result.exit_code or 0
+                exit_code = exec_result.exit_code
+                if type(exit_code) is not int:
+                    outcome["exit_code"] = 125
+                    outcome["stderr"] = "exec returned no valid integer exit status"
+                    return
+                outcome["exit_code"] = exit_code
                 outcome["stdout"] = stdout
                 outcome["stderr"] = stderr
             except Exception as exc:  # noqa: BLE001
@@ -224,12 +229,12 @@ class DockerRunner:
         worker.join(timeout=self.config.docker_timeout)
 
         if worker.is_alive():
-            outcome["timed_out"] = True
-            outcome["exit_code"] = 124
-            outcome["stderr"] = (
+            # Return an immutable timeout outcome. The abandoned worker can
+            # finish later, but cannot replace the timeout with a success.
+            return 124, "", (
                 f"command exceeded the {self.config.docker_timeout}s limit and was "
                 f"abandoned; the sandbox is torn down at the end of the run"
-            )
+            ), True
         return (
             outcome["exit_code"],
             outcome["stdout"],
@@ -276,7 +281,7 @@ class DockerRunner:
             return CheckResult(
                 kind=kind,
                 command=command,
-                exit_code=int(recorded.get("exit_code", 0)),
+                exit_code=recorded["exit_code"],
                 stdout=str(recorded.get("stdout", "")),
                 stderr=str(recorded.get("stderr", "")),
                 duration_ms=int(recorded.get("duration_ms", 0)),
@@ -284,7 +289,8 @@ class DockerRunner:
             )
 
         reason = (
-            "dry run: acceptance commands are never executed on the host; "
+            "dry run: no valid recorded result for this command; "
+            "acceptance commands are never executed on the host; "
             "record a check_fixture to replay results instead"
         )
         return CheckResult(
@@ -309,10 +315,28 @@ class DockerRunner:
             raw = json.loads(Path(path).expanduser().read_text())
         except (OSError, ValueError):
             return self._fixture
+        if not isinstance(raw, dict) or not isinstance(raw.get("checks"), list):
+            return self._fixture
+        seen: set[str] = set()
         for entry in raw.get("checks", []):
+            if not isinstance(entry, dict):
+                continue
             command = entry.get("command")
-            if command:
-                self._fixture[command] = entry
+            if not isinstance(command, str) or not command.strip():
+                continue
+            if command in seen:
+                # An ambiguous fixture cannot pick whichever result happened
+                # to come last, especially when that result says PASS.
+                self._fixture.pop(command, None)
+                continue
+            seen.add(command)
+            duration = entry.get("duration_ms", 0)
+            if (type(entry.get("exit_code")) is not int
+                    or type(duration) is not int or duration < 0
+                    or not isinstance(entry.get("stdout", ""), str)
+                    or not isinstance(entry.get("stderr", ""), str)):
+                continue
+            self._fixture[command] = entry
         return self._fixture
 
     # ------------------------------------------------------------------ #

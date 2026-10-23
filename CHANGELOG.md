@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Require explicit integer exit statuses from Docker and replay fixtures;
+  malformed or duplicate fixture results cannot produce a passing check.
+- Preserve timeout results when an abandoned Docker worker finishes late.
+- Reject unreadable, malformed, or invalid receipt chains instead of skipping
+  damaged records, and verify evidence bytes against their content address.
+- Reject unsafe receipt IDs and atomically refuse duplicate receipt paths,
+  preserving the existing bytes if two writers use the same ID.
+- Make the external fingerprint-tool comparison opt-in so the default test
+  suite does not depend on another repository. Declare the type stubs needed
+  by strict mypy validation in the development dependencies.
+
 ### Added
 
 - **An MCP surface.** `el-verificador/mcp` serves `verify_work_package`,

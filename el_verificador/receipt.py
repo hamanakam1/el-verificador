@@ -47,6 +47,10 @@ _REQUIRED_FIELDS = ("receipt_id", "kind", "created_at")
 _OUTCOMES = ("success", "failed", "partial", "blocked")
 
 
+class ReceiptChainError(ValueError):
+    """The durable record cannot be read and verified in its entirety."""
+
+
 def sort_keys(obj: Any) -> Any:
     """Recursively sort object keys, exactly as the reference tool does."""
     if isinstance(obj, dict):
@@ -171,6 +175,12 @@ class ReceiptChain:
     # ------------------------------------------------------------------ #
     def append(self, receipt: Dict[str, Any]) -> Path:
         """Write a receipt, chaining it to the previous one."""
+        receipt_id = receipt.get("receipt_id")
+        if (not isinstance(receipt_id, str) or not receipt_id
+                or receipt_id in (".", "..")
+                or any(char in receipt_id for char in ("/", "\\"))
+                or any(ord(char) < 32 for char in receipt_id)):
+            raise ReceiptChainError("receipt_id must be a nonempty safe filename component")
         problems = validate_receipt(receipt)
         if problems:
             raise ValueError("invalid receipt: " + "; ".join(problems))
@@ -186,28 +196,59 @@ class ReceiptChain:
         receipt["proof_fingerprint"] = proof
         receipt["full_hash"] = full
 
-        path = self.directory / f"{receipt['receipt_id']}.json"
+        path = self.directory / f"{receipt_id}.json"
         handle, temp_path = tempfile.mkstemp(dir=str(self.directory), suffix=".tmp")
         try:
             with os.fdopen(handle, "w", encoding="utf-8") as stream:
                 json.dump(receipt, stream, indent=2, ensure_ascii=False)
                 stream.write("\n")
-            os.replace(temp_path, path)
-        except BaseException:
+            # Publishing a complete file by hard link is atomic and refuses
+            # an existing destination, including a concurrent writer's file.
+            os.link(temp_path, path)
+        except FileExistsError as exc:
+            raise ReceiptChainError(f"receipt already exists: {receipt_id}") from exc
+        except OSError as exc:
+            raise ReceiptChainError(f"could not append receipt: {receipt_id}") from exc
+        finally:
             Path(temp_path).unlink(missing_ok=True)
-            raise
         return path
 
     # ------------------------------------------------------------------ #
     def receipts(self) -> List[Dict[str, Any]]:
-        """Every receipt, in chain order."""
+        """Every verified receipt, in chain order, or an explicit integrity error.
+
+        Skipping a damaged file could expose an older success as the latest
+        verdict and let new receipts fork from an incomplete history.
+        """
         records: List[Dict[str, Any]] = []
-        for path in sorted(self.directory.glob("*.json")):
+        try:
+            paths = sorted(path for path in self.directory.iterdir() if path.suffix == ".json")
+        except OSError as exc:
+            raise ReceiptChainError("cannot read receipt directory") from exc
+        for path in paths:
             try:
-                records.append(json.loads(path.read_text()))
-            except (OSError, ValueError):
-                continue
+                record = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise ReceiptChainError(f"unreadable receipt: {path.name}") from exc
+            if not isinstance(record, dict):
+                raise ReceiptChainError(f"receipt is not a JSON object: {path.name}")
+            try:
+                problems = validate_receipt(record)
+            except (TypeError, ValueError) as exc:
+                raise ReceiptChainError(f"receipt cannot be fingerprinted: {path.name}") from exc
+            if problems:
+                raise ReceiptChainError(f"invalid receipt fingerprint or fields: {path.name}")
+            records.append(record)
         records.sort(key=_order_key)
+        previous: Optional[Dict[str, Any]] = None
+        for record in records:
+            if previous is None:
+                if record.get("previous_receipt_id") or record.get("previous_fingerprint"):
+                    raise ReceiptChainError("receipt chain has no valid genesis")
+            elif (record.get("previous_receipt_id") != previous.get("receipt_id")
+                  or record.get("previous_fingerprint") != previous.get("proof_fingerprint")):
+                raise ReceiptChainError("receipt chain links are invalid")
+            previous = record
         return records
 
     def last(self) -> Optional[Dict[str, Any]]:
@@ -216,22 +257,10 @@ class ReceiptChain:
 
     def verify_chain(self) -> bool:
         """Verify the chain: every link, every fingerprint, every body."""
-        records = self.receipts()
-        previous: Optional[Dict[str, Any]] = None
-        for record in records:
-            if validate_receipt(record):
-                return False
-            if previous is None:
-                if record.get("previous_receipt_id"):
-                    return False
-            else:
-                if record.get("previous_receipt_id") != previous.get("receipt_id"):
-                    return False
-                if record.get("previous_fingerprint") != previous.get(
-                    "proof_fingerprint"
-                ):
-                    return False
-            previous = record
+        try:
+            self.receipts()
+        except ReceiptChainError:
+            return False
         return True
 
     def for_ticket(self, ticket: str) -> List[Dict[str, Any]]:
@@ -274,6 +303,7 @@ def artifact_records(artifacts: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]
 
 __all__ = [
     "ReceiptChain",
+    "ReceiptChainError",
     "artifact_records",
     "build_receipt",
     "canonical_bytes",

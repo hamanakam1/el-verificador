@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from datetime import UTC, datetime
 from enum import Enum
@@ -28,6 +29,10 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from .schemas import SemanticDiff
+
+
+class EvidenceIntegrityError(ValueError):
+    """Stored evidence does not match its content-addressed identity."""
 
 
 class EvidenceKind(str, Enum):
@@ -76,7 +81,9 @@ class EvidenceArtifact(BaseModel):
             data = Path(self.path).read_bytes()
         except OSError:
             return False
-        return hashlib.sha256(data).hexdigest() == self.sha256
+        return (self.id == self.sha256
+                and len(data) == self.bytes
+                and hashlib.sha256(data).hexdigest() == self.sha256)
 
 
 class EvidenceStore:
@@ -104,7 +111,10 @@ class EvidenceStore:
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{kind.value}{kind.suffix}"
 
-        if not target.exists():
+        if target.exists():
+            if target.read_bytes() != data:
+                raise EvidenceIntegrityError(f"stored evidence does not match digest: {digest}")
+        else:
             handle, temp_path = tempfile.mkstemp(dir=str(directory))
             try:
                 with os.fdopen(handle, "wb") as stream:
@@ -152,18 +162,22 @@ class EvidenceStore:
     # ------------------------------------------------------------------ #
     def get(self, digest: str) -> Optional[EvidenceArtifact]:
         """The artifact for a digest, if the store still holds it."""
+        if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+            raise ValueError("evidence digest must be a lowercase SHA-256 hex string")
         directory = self.root / digest[:2] / digest
         if not directory.is_dir():
             return None
         for child in sorted(directory.iterdir()):
             if child.is_file():
                 data = child.read_bytes()
+                if hashlib.sha256(data).hexdigest() != digest:
+                    raise EvidenceIntegrityError(f"stored evidence does not match digest: {digest}")
                 return EvidenceArtifact(
                     id=digest,
                     kind=_kind_from_suffix(child.name),
                     path=str(child),
                     bytes=len(data),
-                    sha256=hashlib.sha256(data).hexdigest(),
+                    sha256=digest,
                 )
         return None
 
@@ -213,6 +227,7 @@ def summarise_diff(diff: SemanticDiff) -> Dict[str, Any]:
 __all__ = [
     "EvidenceArtifact",
     "EvidenceKind",
+    "EvidenceIntegrityError",
     "EvidenceStore",
     "summarise_diff",
 ]

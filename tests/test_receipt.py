@@ -10,14 +10,17 @@ reference verifier rejected, because Python's `json.dumps` escapes non-ASCII by
 default and the canonical rule requires it to be left as literal UTF-8.
 """
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from el_verificador.receipt import (
     ReceiptChain,
+    ReceiptChainError,
     artifact_records,
     build_receipt,
     canonical_bytes,
@@ -27,7 +30,8 @@ from el_verificador.receipt import (
     validate_receipt,
 )
 
-ERA_TOOL = Path.home() / "Projects" / "edgerecord-main" / "bin" / "era-fingerprint.py"
+_ERA_TOOL_PATH = os.environ.get("EL_VERIFICADOR_FINGERPRINT_TOOL")
+ERA_TOOL = Path(_ERA_TOOL_PATH) if _ERA_TOOL_PATH else None
 
 
 def _receipt(**kwargs):
@@ -96,7 +100,10 @@ class TestCanonicalHashing(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_receipt(receipt_id="x", kind="verification", outcome="maybe")
 
-    @unittest.skipUnless(ERA_TOOL.exists(), "the EdgeRecord fingerprint tool is not present")
+    @unittest.skipUnless(
+        ERA_TOOL is not None and ERA_TOOL.is_file(),
+        "set EL_VERIFICADOR_FINGERPRINT_TOOL to opt into the reference-tool integration",
+    )
     def test_the_reference_tool_agrees(self):
         """Byte-for-byte agreement with EdgeRecord's own tool."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -116,6 +123,7 @@ class TestCanonicalHashing(unittest.TestCase):
 class TestReceiptChain(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
         self.chain = ReceiptChain(self._tmp.name)
 
     def test_a_receipt_is_written(self):
@@ -161,6 +169,88 @@ class TestReceiptChain(unittest.TestCase):
         receipt["proof_fingerprint"] = "0" * 16
         with self.assertRaises(ValueError):
             self.chain.append(receipt)
+
+    def test_unreadable_or_nonobject_receipts_are_not_silently_omitted(self):
+        path = self.chain.append(_receipt(receipt_id="first"))
+        for damaged in (b"{truncated", b"\xff", b"[]", b"null", b"42", b'"text"',
+                        b'{"summary": "\\ud800"}'):
+            with self.subTest(damaged=damaged):
+                path.write_bytes(damaged)
+                self.assertFalse(self.chain.verify_chain())
+                with self.assertRaises(ReceiptChainError):
+                    self.chain.receipts()
+                with self.assertRaises(ReceiptChainError):
+                    self.chain.append(_receipt(receipt_id="next"))
+                self.assertEqual(path.read_bytes(), damaged)
+                self.assertEqual(list(Path(self._tmp.name).iterdir()), [path])
+
+    def test_a_truncated_tail_cannot_hide_a_newer_verdict(self):
+        first = self.chain.append(_receipt(receipt_id="first"))
+        second = self.chain.append(_receipt(receipt_id="second", outcome="failed"))
+        first_bytes = first.read_bytes()
+        second.write_text("{truncated", encoding="utf-8")
+        self.assertFalse(self.chain.verify_chain())
+        with self.assertRaises(ReceiptChainError):
+            self.chain.last()
+        with self.assertRaises(ReceiptChainError):
+            self.chain.append(_receipt(receipt_id="third"))
+        self.assertEqual(first.read_bytes(), first_bytes)
+        self.assertEqual(second.read_text(), "{truncated")
+        self.assertFalse((Path(self._tmp.name) / "third.json").exists())
+
+    def test_a_valid_json_tamper_blocks_append(self):
+        path = self.chain.append(_receipt())
+        record = json.loads(path.read_text())
+        record["outcome"] = "failed"
+        damaged = json.dumps(record)
+        path.write_text(damaged)
+        with self.assertRaises(ReceiptChainError):
+            self.chain.append(_receipt(receipt_id="next"))
+        self.assertEqual(path.read_text(), damaged)
+        self.assertFalse(self.chain.verify_chain())
+
+    def test_receipt_read_failure_blocks_verification_and_append(self):
+        self.chain.append(_receipt())
+        with patch.object(Path, "read_text", side_effect=PermissionError("denied")):
+            self.assertFalse(self.chain.verify_chain())
+            with self.assertRaises(ReceiptChainError):
+                self.chain.append(_receipt(receipt_id="next"))
+
+    def test_directory_read_failure_is_not_an_empty_valid_chain(self):
+        with patch.object(Path, "iterdir", side_effect=PermissionError("denied")):
+            self.assertFalse(self.chain.verify_chain())
+            with self.assertRaises(ReceiptChainError):
+                self.chain.append(_receipt(receipt_id="next"))
+
+    def test_duplicate_receipt_id_preserves_the_original_bytes(self):
+        path = self.chain.append(_receipt(receipt_id="duplicate"))
+        original = path.read_bytes()
+        with self.assertRaisesRegex(ReceiptChainError, "already exists"):
+            self.chain.append(_receipt(receipt_id="duplicate", outcome="failed"))
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(list(Path(self._tmp.name).iterdir()), [path])
+        self.assertTrue(self.chain.verify_chain())
+
+    def test_invalid_receipt_ids_are_rejected_before_writing(self):
+        for receipt_id in ("../outside", "/outside", "nested/name", "nested\\name",
+                           ".", "..", "", "bad\x00name", "bad\nname"):
+            with self.subTest(receipt_id=receipt_id), self.assertRaises(ReceiptChainError):
+                self.chain.append(_receipt(receipt_id=receipt_id))
+            self.assertEqual(list(Path(self._tmp.name).iterdir()), [])
+
+    def test_a_concurrent_destination_is_not_overwritten(self):
+        destination = Path(self._tmp.name) / "racing.json"
+        real_link = os.link
+
+        def competing_writer(source, target):
+            Path(target).write_bytes(b"concurrent receipt bytes")
+            real_link(source, target)
+
+        with patch("el_verificador.receipt.os.link", side_effect=competing_writer):
+            with self.assertRaisesRegex(ReceiptChainError, "already exists"):
+                self.chain.append(_receipt(receipt_id="racing"))
+        self.assertEqual(destination.read_bytes(), b"concurrent receipt bytes")
+        self.assertEqual(list(Path(self._tmp.name).iterdir()), [destination])
 
     def test_receipts_can_be_found_by_ticket(self):
         self.chain.append(_receipt(receipt_id="va-audit-0000000000000001", ticket="M-7"))

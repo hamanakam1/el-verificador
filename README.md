@@ -173,7 +173,7 @@ repositories, and a CI job runs the acceptance checks inside a real container.
   operator
 - An MCP surface, so an agent asks the verifier instead of reimplementing checks
 
-**The regression harness is a golden fixture suite.** Eight synthetic
+**The regression harness is a golden fixture suite.** Ten synthetic
 repositories with known verdicts, verified end to end through real git:
 
 | Fixture | Expected |
@@ -186,6 +186,19 @@ repositories with known verdicts, verified end to end through real git:
 | `symbol_missing` | fail — `symbol_present` |
 | `empty_diff` | fail — `change_present` |
 | `broken_build` | fail — `acceptance_command_0` |
+| `contract_honoured` | fail — the work package's own `npm test` failure is respected |
+| `missing_exit_status` | inconclusive — an absent exit code cannot count as success |
+
+Replay fixtures must contain one result per exact command, with an explicit
+integer `exit_code`. Invalid or duplicate records are skipped, leaving the
+acceptance obligation unresolved. Docker results without a valid integer exit
+status fail with exit `125`; a late result cannot replace a reported timeout.
+
+Receipt-chain reads validate every stored record. A damaged receipt causes an
+integrity error and prevents further appends, rather than exposing an older
+success as the latest result. Evidence lookups also verify the stored bytes
+against their content hash. Preserve damaged records for investigation; the
+verifier does not silently repair or replace them.
 
 **Known gaps, all tracked in [ROADMAP.md](ROADMAP.md):**
 

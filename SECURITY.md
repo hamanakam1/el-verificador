@@ -19,6 +19,9 @@ the component, and the boundaries are not negotiable:
   run. A check either runs in the container, is replayed from a recorded
   fixture, or reports that it did not run. A check that did not run can never
   pass, so a dry run can never manufacture a verdict.
+- A result must carry an explicit integer exit status. Missing, boolean,
+  fractional, or string statuses cannot stand in for exit `0`. Invalid or
+  duplicate replay records are skipped and cannot satisfy acceptance.
 - The container runs as a non-root uid, with the network disabled by default and
   with memory, CPU and PID caps.
 - Each check has a wall-clock limit. An overrun is reported as exit `124`, and
@@ -98,6 +101,13 @@ narrow:
   `bin/era-fingerprint.py`, including the non-ASCII case that broke
   ERA-000314.
 - `ReceiptChain.verify_chain()` validates every link and every fingerprint.
+- Unreadable or malformed receipts invalidate the chain; appending to a corrupt
+  chain is refused without changing existing records. Evidence retrieval
+  verifies that its bytes still match the requested content hash.
+- A receipt ID must be a safe filename component. Publication refuses an
+  existing receipt atomically, including a destination created concurrently.
+  Distinct concurrent appends are not serialized yet; a resulting chain fork
+  is detected on read and requires operator investigation.
 
 These protect the integrity of the record, not the confidentiality of its
 contents.
