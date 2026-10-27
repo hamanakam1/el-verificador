@@ -36,6 +36,33 @@ EEEEE  LLLLL      V    EEEEE  R   R  IIIII  F      IIIII   CCCC  A   A  DDDD    
 
 El Verificador is the autonomous gatekeeper that closes the loop in the Panther → El Destilador → Ticket Board → El Hidratador → Taskrivet → **El Verificador** → EdgeRecord pipeline. It independently audits Taskrivet's work before the Docker sandbox is torn down and code is merged.
 
+```mermaid
+flowchart TD
+    subgraph Pipeline["Taskrivet Execution Pipeline"]
+        TR["<b>Taskrivet Worker</b><br/><i>runs code in Docker sandbox</i>"]
+    end
+
+    subgraph Verificador["El Verificador (Building Inspector)"]
+        direction TB
+        AC["<b>1. Acceptance Testing</b><br/><i>runs CI, unit tests, linters in sandbox</i>"]
+        OB["<b>2. Intent & Obligations Audit</b><br/><i>AST changes, diffs vs Work Package</i>"]
+        VD["<b>Deterministic Verdict</b><br/><i>Passed vs. Violated</i>"]
+
+        AC --> VD
+        OB --> VD
+    end
+
+    subgraph Gateways["Post-Audit Outcomes"]
+        CP["<b>Correction Prompt Loop</b><br/><i>bounded stack trace & diff feedback (max retries)</i>"]
+        ER[("<b>EdgeRecord Ledger</b><br/><i>immutable audit payload sealed & code committed</i>")]
+    end
+
+    TR -->|Hydrated sandbox state| Verificador
+    VD -->|Fail / Violations| CP
+    CP -->|Guarded retry loop| TR
+    VD -->|Pass / All obligations met| ER
+```
+
 ## Core Responsibilities
 
 ### 1. Independent Acceptance Testing
