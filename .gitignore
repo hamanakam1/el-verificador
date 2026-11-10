@@ -8,3 +8,4 @@ dist/
 .local-config.yaml
 ~/.el-verificador/
 docs/examples/**/.venv/
+.DS_Store
