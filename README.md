@@ -169,18 +169,31 @@ acceptance contract was hardcoded, the host was a silent fallback for the
 sandbox, and **the audit trail was never written at all** — the logger could
 not be injected, so every verification ran, decided, and recorded nothing.
 
-`scripts/verify_end_to_end.sh` runs the whole cycle through the CLI in a
-temporary directory and prints what was decided and what was recorded:
+`scripts/verify_cli_smoke.sh` runs the whole cycle through the CLI in a
+temporary directory and prints what was decided and what was recorded. It
+builds the repository it verifies, so running its acceptance command on the
+host is safe, and it fails loudly if the decision is not the expected one:
 
 ```bash
 === verify ===
 decision          : pass
+passed            : True
 contract source   : work-package
-intent coverage   : 1.0
+contract commands : ['python3 -m unittest discover -s tests -t . -q']
+intent coverage   : 0.8
+files changed     : ['app/routes.py']
+check             : python3 -m unittest discover -s tests -t . -q -> exit 0
 
-=== audit chain ===
-Audit chain valid: True (1 records verified)
+OK: the CLI verified the work package end to end.
+
+=== the audit ledger ===
+Audit chain valid: True (0 records verified)
 ```
+
+A dry run writes no audit record — the decision that outlives a run is the
+one that was written down — so the chain check reports zero records. The
+ledger and its chain are covered by `tests/test_audit_chain.py`. The script
+runs in CI, so it cannot rot unnoticed.
 
 **Known gaps, all tracked in [ROADMAP.md](ROADMAP.md):**
 
